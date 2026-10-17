@@ -77,7 +77,6 @@ const DISPATCH_SPEED = 60 // simulated seconds per real second in the dispatch a
 // Arm, click the map, fetch the decision, then run a clock for the animation
 function useDispatch(day, playback) {
   const [state, setState] = useState({ armed: false, loading: false, error: null, result: null })
-  const [priority, setPriority] = useState('3')
   const [elapsed, setElapsed] = useState(0)
   const [runId, setRunId] = useState(0)
 
@@ -107,7 +106,7 @@ function useDispatch(day, playback) {
     const pad = (n) => String(n).padStart(2, '0')
     const t = `${day}T${pad(Math.floor(s / 3600) % 24)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`
     setState({ armed: false, loading: true, error: null, result: null })
-    dispatchIncident(lat, lon, t, priority)
+    dispatchIncident(lat, lon, t, '2')
       .then((result) => {
         setElapsed(0)
         setState({ armed: false, loading: false, error: null, result })
@@ -119,7 +118,7 @@ function useDispatch(day, playback) {
     setElapsed(0)
     setRunId((n) => n + 1)
   }
-  return { state, elapsed, arm, close, pick, replay, priority, setPriority }
+  return { state, elapsed, arm, close, pick, replay }
 }
 
 const gain = (diff) => mmss(Math.abs(diff))
@@ -275,8 +274,7 @@ export default function App() {
           <Legend />
         </div>
         <aside className="side">
-          <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
-            priority={dispatch.priority} setPriority={dispatch.setPriority} />
+          <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay} />
           <VersionLog />
           <Sources />
         </aside>
