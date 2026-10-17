@@ -7,7 +7,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 8,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/S280_at_John_Daly_Bl.stream/playlist.m3u8"
  },
  {
   "camera_id": "TV322",
@@ -17,7 +18,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 11,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/N280_at_JCT_101.stream/playlist.m3u8"
  },
  {
   "camera_id": "TV317",
@@ -27,7 +29,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 14,
   "moving_frac": 0.2,
-  "slowdown": 3.2
+  "slowdown": 3.2,
+  "stream": "https://wzmedia.dot.ca.gov/D4/N280_at_6th.stream/playlist.m3u8"
  },
  {
   "camera_id": "TV388",
@@ -37,7 +40,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 17,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/N1_at_Presidio_Tunnel.stream/playlist.m3u8"
  },
  {
   "camera_id": "TV304",
@@ -47,7 +51,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 20,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_JCT_101.stream/playlist.m3u8"
  },
  {
   "camera_id": "TV316",
@@ -57,7 +62,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 23,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_6th_St.stream/playlist.m3u8"
  },
  {
   "camera_id": "TV305",
@@ -67,7 +73,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 26,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/N101_at_Candlestick_Park.stream/playlist.m3u8"
  },
  {
   "camera_id": "TVD01",
@@ -77,7 +84,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 29,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/W80_at_Fremont_St_Ofr.stream/playlist.m3u8"
  },
  {
   "camera_id": "TVD32",
@@ -87,7 +95,8 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 32,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/W80_at_SAS_Tower.stream/playlist.m3u8"
  },
  {
   "camera_id": "TVD33",
@@ -97,6 +106,7 @@
   "ts": "2026-10-17T17:30:00",
   "vehicles": 35,
   "moving_frac": 0.9,
-  "slowdown": 1.1
+  "slowdown": 1.1,
+  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_SAS_Tower.stream/playlist.m3u8"
  }
 ]

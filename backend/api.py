@@ -92,7 +92,9 @@ def policy(version: str):
 
 @app.get("/cameras")
 def cameras():
-    return load_json(DATA / "camera_readings.json", FIXTURES / "cameras.json")
+    rows = load_json(DATA / "camera_readings.json", FIXTURES / "cameras.json")
+    streams = {c["camera_id"]: c.get("stream") for c in load_json(DATA / "cameras.json")} if (DATA / "cameras.json").exists() else {}
+    return [{**r, "stream": r.get("stream") or streams.get(r["camera_id"])} for r in rows]
 
 
 @app.get("/posts")
