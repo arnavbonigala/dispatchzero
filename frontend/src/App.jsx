@@ -310,8 +310,10 @@ export default function App() {
       <Legend />
       <aside className="side glass">
         <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
-          onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))} />
-        <CallFlow calls={dispatching ? [] : calls} now={playback.now} result={dispatch.state.result} elapsed={dispatch.elapsed} />
+          onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))}>
+          <CallFlow calls={[]} now={0} result={dispatch.state.result} elapsed={dispatch.elapsed} />
+        </DispatchPanel>
+        <CallFlow calls={dispatching ? [] : calls} now={playback.now} result={null} elapsed={0} />
         <VersionLog />
         <Sources />
       </aside>

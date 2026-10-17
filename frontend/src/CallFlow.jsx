@@ -132,7 +132,7 @@ export default function CallFlow({ calls, now, result, elapsed }) {
 
   if (live) {
     return (
-      <section className="cf" aria-labelledby="cf-title">
+      <section className="cf cf-live" aria-labelledby="cf-title">
         <h2 id="cf-title">Your incident, step by step</h2>
         <Flow title="live" stages={dispatchStages(result)} t={intro >= 4 ? elapsed : 0} revealed={intro} />
       </section>

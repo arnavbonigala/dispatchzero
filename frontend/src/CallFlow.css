@@ -44,3 +44,4 @@
   .cf-active .cf-node, .cf-detail { animation: none; }
   .cf-node, .cf-label, .cf-done::before { transition: none; }
 }
+.cf-live { padding-bottom: 0; border-bottom: 0; }

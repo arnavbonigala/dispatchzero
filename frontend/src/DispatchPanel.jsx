@@ -25,7 +25,7 @@ const TRAFFIC = {
   osm: 'learned road speeds (no Google key)',
 }
 
-export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch }) {
+export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch, children }) {
   const { armed, loading, error, result } = state
   return (
     <section className="dispatch" aria-labelledby="dp-title">
@@ -53,6 +53,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch
           <p className="dp-where">
             <b>{result.incident.nbhd}</b> · {clock(Number(result.incident.t.slice(11, 13)) * 3600 + Number(result.incident.t.slice(14, 16)) * 60)}
           </p>
+          {children}
           <div className="dp-compare">
             <Side title="Baseline" side={result.baseline} />
             <Side title="Golden Minute" side={result.agent} gm />
