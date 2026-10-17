@@ -125,7 +125,6 @@ cd frontend && npm install && npm run dev
 | `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading`; latest in `data/camera_readings.json`, history appended to `data/camera_log.jsonl` (timestamps in San Francisco time; `--clip` replays are marked `"source": "clip"` and never logged) |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + MapLibre + deck.gl: replay map with a 3D view, learning log, call flow, live dispatch, live camera video |
-| `PITCH.md` | C | 3-minute pitch script with the real frozen-week numbers, slide outline and judge Q&A |
 
 ## Policy contract
 
