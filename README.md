@@ -24,12 +24,12 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | `backend/contracts.py` | All | Frozen shapes: `Call`, `IdleUnit`, `CallResult`, `Summary`, `Version`, `CameraReading`, policy signatures |
 | `backend/fetch.py` | A | Data download |
-| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--offload-cap MINUTES`, `--dispatch-at-entry`, `--self-check`, `--fixtures` |
+| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--traffic`, `--traffic-report`, `--offload-cap MINUTES`, `--dispatch-at-entry`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
-| `backend/agent.py` | C | Improvement loop: `--iters N [--model sonnet]`, `--headline` |
+| `backend/agent.py` | C | Improvement loop: `--iters N [--model sonnet] [--traffic]`, `--headline` |
 | `backend/api.py` | C | FastAPI: `uvicorn --app-dir backend api:app --port 8000` |
 | `backend/dispatch.py` | B | Live dispatch of one incident: replays the frozen week to that moment, then compares baseline and the best engine-mode version (ambulance, engine, hospital, routes). `/dispatch?lat=&lon=&t=&priority=2\|3`; CLI `dispatch.py LAT LON T --priority 2`. Set `GOOGLE_MAPS_API_KEY` to re-time the closest candidates with live traffic |
-| `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading` |
+| `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading`; latest in `data/camera_readings.json`, history appended to `data/camera_log.jsonl` |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + Leaflet |
 | `PITCH.md` | C | 3-minute pitch script with the real frozen-week numbers, slide outline and judge Q&A |
@@ -54,6 +54,7 @@ Injected globals:
 - `WEATHER`: `"2026-09-07T14"` (call `t[:13]`) to `{rain_mm, temp_c}`, hourly from the Open-Meteo archive
 - `NBHD`: neighborhood to `{population, pct_65_plus}`, ACS 2019 to 2023 via DataSF `4qbq-hvtt`
 - `FORECAST`: `"Neighborhood|2026-09-07T14"` to expected calls that hour (`backend/forecast.py`, fit on the training weeks only), empty until `data/forecast.json` exists
+- `TRAFFIC`: with `sim.py --traffic` only, otherwise `{}`. Time bucket to the freeway cameras slowed in it, `[{camera_id, name, route, lat, lon, slowdown, n}]`: the median of at least 3 logged camera readings in that bucket. `eta` and every drive time already include it.
 - `COVERAGE(units, call)`: lookahead. Expected seconds to reach this hour's forecast calls (FORECAST-weighted over neighborhoods) if only `units` (dicts with `post`) stay free. Compare `COVERAGE(idle, call)` with `COVERAGE(idle minus a candidate, call)` to see what sending that unit costs the next caller.
 
 Rules the simulator enforces:
@@ -106,6 +107,9 @@ Limits to state honestly: SF publishes no unit locations, so the simulator assum
 - `World.load(slowdowns=...)` rebuilds travel times with those slowdowns.
 - `Roads.path(src_node, dst_node, slowdowns)` returns `(seconds, [[lat, lon], ...])` for drawing a route on the map.
 - `--jam-test CAMERA_ID` measures the direct effect of a jam on the holdout week: calls whose best route crosses the jam, calls that should be sent from a different post, and seconds saved by switching versus dispatching blind.
+
+- `--traffic` turns `data/camera_log.jsonl` into a typical slowdown per camera and time bucket (`traffic_profile`, median of at least 3 readings, only slowdowns above 1) and gives each bucket its own drive times, used for dispatch, `eta`, returns, moves and engines. Demand, `POST_DRIVE` and `COVERAGE` stay on normal roads. Off by default, so scores without it are unchanged. `--traffic-report` prints the profile. Buckets ignore the day of the week, and readings logged on a weekend count the same as weekday ones.
+- `agent.py --traffic` scores every candidate and baseline with `--traffic`, lists the slowest cameras per bucket in the prompt, and marks rows with `"traffic": true`.
 
 Finding: in-city ambulance routes rarely use the freeways Caltrans covers. At 4× slowdown, most SF cameras affect 0 to 14 calls a week; SR-1 near the Presidio Tunnel is the clearest case (2 calls switched, about 128 s saved each). Camera value is mostly a live-demo story, not a measurable weekly gain.
 

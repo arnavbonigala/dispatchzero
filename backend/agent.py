@@ -17,6 +17,7 @@ PY = sys.executable
 HEADLINE = RUNS / "headline.json"
 PREFIX = "v"
 EXTRA = []
+TRAFFIC_ARGS = []  # ["--traffic"] scores every candidate with camera congestion
 SIM_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
@@ -90,10 +91,22 @@ def send_engine(call, engines, eta, ambulance_s) -> str | None
 
 
 def sim(*args, timeout=SIM_TIMEOUT_S):
-    p = subprocess.run([PY, str(BACKEND / "sim.py"), *args, *EXTRA], capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run([PY, str(BACKEND / "sim.py"), *args, *EXTRA, *TRAFFIC_ARGS], capture_output=True, text=True, timeout=timeout)
     if p.returncode:
         raise RuntimeError((p.stderr or p.stdout).strip().splitlines()[-1])
     return json.loads(p.stdout)
+
+
+def traffic_note():
+    """System-prompt paragraph on camera congestion, or "" when traffic mode is off."""
+    if not TRAFFIC_ARGS:
+        return ""
+    prof = sim("--traffic-report")["buckets"]
+    worst = "; ".join(f"{b}: " + ", ".join(f"{c['name'].split('--')[-1].strip()} {c['slowdown']}x" for c in cams[:4]) for b, cams in prof.items())
+    return ("Traffic mode: drive times include typical freeway congestion per time bucket, measured by Caltrans cameras and a "
+            "vision model, and `eta` already includes it. Injected global `TRAFFIC` maps a time bucket to the slowed cameras, "
+            "[{camera_id, name, route, lat, lon, slowdown, n}]. Units whose route crosses a slowed freeway may be better placed "
+            f"on the other side of it during that bucket. Slowest cameras: {worst or 'none yet, roads are normal'}.\n\n")
 
 
 REVIEW_SYSTEM = """You review a candidate ambulance dispatch policy before it is tested on real San Francisco 911 calls. Veto it only for one of these:
@@ -238,7 +251,7 @@ def step(model, k=4):
         best=best, summary=json.dumps(slim(best_train)), base=json.dumps(slim(base_train)),
         history="\n".join(json.dumps(r) for r in recent), lessons=lessons(), near=near, code=(POLICIES / f"{best}.py").read_text(),
         worst=json.dumps({key: v for key, v in worst.items() if key != "summary"}))
-    system = SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS, goal=ENGINE_GOAL if EXTRA else GOAL)
+    system = SYSTEM.format(contract=contract(), engines=(ENGINE_NOTE if EXTRA else "") + traffic_note(), hints="" if EXTRA else MOVE_HINTS, goal=ENGINE_GOAL if EXTRA else GOAL)
     angles = ANGLES["engines" if EXTRA else ""]
     names = next_names(k)
     with ThreadPoolExecutor(k) as pool:
@@ -255,7 +268,7 @@ def step(model, k=4):
 
 
 def candidate(name, best, best_train, angle, prompt, system, model):
-    row = {"version": name, "parent": best, "angle": angle, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
+    row = {"version": name, "parent": best, "angle": angle, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False, **({"traffic": True} if TRAFFIC_ARGS else {})}
     train, ok = None, False
     try:
         row["diagnosis"], code = parse(ask(prompt, system, model))
@@ -337,7 +350,11 @@ def main():
     ap.add_argument("--rescore", action="store_true")
     ap.add_argument("--engines", action="store_true")
     ap.add_argument("--candidates", type=int, default=4)
+    ap.add_argument("--traffic", action="store_true", help="score candidates with freeway congestion from the camera log")
     a = ap.parse_args()
+    if a.traffic:
+        global TRAFFIC_ARGS
+        TRAFFIC_ARGS = ["--traffic"]
     if a.engines:
         global VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS
         VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS = RUNS / "engines.jsonl", RUNS / "engines_headline.json", "e", ["--engines"], RUNS / "lessons_engines.md"
