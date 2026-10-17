@@ -13,7 +13,7 @@ uv pip install --python .venv/bin/python -r requirements.txt
 cd frontend && npm install && npm run dev
 ```
 
-`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 4 train, week 5 frozen), ambulance posts, unit home posts, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph.
+`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph.
 
 ## Layout
 
@@ -21,7 +21,7 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | `backend/contracts.py` | All | Frozen shapes: `Call`, `IdleUnit`, `CallResult`, `Summary`, `Version`, `CameraReading`, policy signatures |
 | `backend/fetch.py` | A | Data download |
-| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME --split train\|frozen --out FILE`, `--calibrate`, `--self-check`, `--fixtures` |
+| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
 | `backend/agent.py` | C | Improvement loop |
 | `backend/api.py` | C | FastAPI |
@@ -38,8 +38,23 @@ def post_plan(hour: int, units: list[str]) -> dict[str, int]
 def choose_unit(call: Call, idle: list[IdleUnit], eta) -> str
 ```
 
-`eta(unit, call)` returns drive seconds from the unit's post to the call. Policies only see dispatcher-visible call fields: `call_id`, `t`, `lat`, `lon`, `hour`, `nbhd`, `station_area`, `priority`. Moving a unit to a new post in `post_plan` costs its drive time between posts, during which it is unavailable.
+`eta(unit, call)` returns drive seconds from the unit's post to the call. The module also gets two injected globals: `HOME` (unit to home post) and `POSTS` (list of `{post, station_area, lat, lon}`).
+
+Rules the simulator enforces:
+- Policies only see dispatcher-visible call fields: an opaque per-run `call_id`, `t`, `lat`, `lon`, `hour`, `nbhd`, `station_area`, `priority`.
+- Source is checked before loading: imports limited to `math`, `statistics`, `collections`, `itertools`, `functools`, `heapq`, `bisect`, `random`; no file access, `eval`/`exec`, `getattr`, or underscore attributes. Violations raise `PolicyRejected`.
+- `choose_unit` must return an idle unit's id. Anything else, or an exception, falls back to the closest idle unit and is counted in `stats`.
+- Moving a unit to a new post in `post_plan` costs its drive time between posts, starting at the hour boundary.
+- After each call the unit drives back to its post before it is available again.
+
+## Splits and reporting
+
+- `train` (weeks 1 to 3): the agent diagnoses from these.
+- `holdout` (week 4): the agent's promotion gate.
+- `frozen` (week 5): touched only for the final headline, reported with `--compare baseline` (paired bootstrap 95% CI). The frozen baseline median has about ±28s of sampling noise, so gains smaller than that are not real.
 
 ## Calibration
 
-OSM speed-limit travel times are scaled by one factor per time-of-day bucket so the baseline policy's simulated median drive time matches SF's actual median on the training weeks. Current fit: baseline sim median 680s vs actual 663s on train (+2.6%), 697s vs 658s on the frozen week (+6.0%). Factors are about 1.9 to 2.3, so they also absorb units not being at their post when dispatched.
+OSM speed-limit travel times are scaled by one factor per time-of-day bucket so the baseline policy's simulated median drive time matches SF's actual median on the training weeks. Fit on weeks 1 to 4: baseline sim median 681s vs actual 663s (+2.8%); frozen week 696s vs 658s (+5.8%). Factors are about 1.8 to 2.4.
+
+Limits to state honestly: SF publishes no unit locations, so the simulator assumes idle units wait at posts. Per-call simulated drive time correlates only weakly with real drive time (Spearman 0.16, median absolute error about 320s), and the factors also absorb units not being at their post. Present gains as simulator-relative estimates calibrated to SF's real medians, not as predicted real-world seconds.

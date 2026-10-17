@@ -90,7 +90,7 @@ def choose_unit(call: dict, idle: list[dict], eta) -> str              # eta(uni
 1. Run the current best on training weeks and collect the summary plus the 50 worst calls, each with context (hour, neighborhood, which unit went, from where, nearest idle unit and its ETA).
 2. Prompt Claude (latest Sonnet for speed) with the current policy code, the summary, the worst calls, and the last 5 diagnoses from `versions.jsonl`. It returns a diagnosis plus the full new policy file.
 3. Run the candidate in a subprocess with a timeout. Reject it on a crash or a timeout.
-4. Gate 1: it must beat the current best on the training weeks. Gate 2: it must also beat the current best on the **frozen week**. Only then is it promoted.
+4. Gate 1: it must beat the current best on the training weeks. Gate 2: it must also beat the current best on the **holdout week** (week 4). Only then is it promoted. The frozen week (week 5) is evaluated once, for the final headline, with `sim.py --compare baseline` (paired bootstrap CI).
 5. Append `{version, parent, diagnosis, train_median, frozen_median, accepted}` to `versions.jsonl`.
 6. Run 6 to 10 iterations before the demo, and keep the run log; this becomes the improvement chart.
 
@@ -147,6 +147,8 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] Calibration: baseline sim median within 10% of actual (1:30 go/no-go): +2.6% train, +6.0% frozen
 - [x] Sim speed-up (cached travel times from posts): full train replay in about 1.5s
 - [x] `sim.py --self-check` passing
+- [x] Simulator hardened against cheating policies (source check, opaque call ids, validated choices, relocation and return-drive costs)
+- [x] Holdout week split; paired bootstrap CI via `--compare`
 - [ ] Worst-50 calls with context for the agent
 - [ ] Stretch: learned road speeds, kept only if frozen-week error drops
 - [ ] `edge_slowdowns()` wired into the simulator
