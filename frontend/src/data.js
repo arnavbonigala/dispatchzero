@@ -1,17 +1,17 @@
 // Data comes from C's FastAPI (proxied at /api) when it is up, and from fixtures/ otherwise.
 // loadFixtures() is instant so the page renders at once; loadLive() then swaps in API data
 // endpoint by endpoint, keeping the fixture for any endpoint that fails.
-import fxResults from '@fixtures/results.json'
-import fxSummary from '@fixtures/summary.json'
+import fxBaseline from '@fixtures/engines_baseline.json'
+import fxAgent from '@fixtures/engines_agent.json'
+import fxHeadline from '@fixtures/engines_headline.json'
 import fxPosts from '@fixtures/posts.json'
 import fxCameras from '@fixtures/cameras.json'
 import cameraImages from '@fixtures/camera_images.json'
 import fxSlow from '@fixtures/slow_nbhds.json'
-import fxHeadline from '@fixtures/headline.json'
-import fxEnginesHeadline from '@fixtures/engines_headline.json'
 import neighborhoods from '@fixtures/neighborhoods.geojson?raw'
 
 const SPLIT = 'frozen'
+const MODE = 'engines'
 const QUICK_MS = 4000
 const SIM_MS = 200000 // first /results call for a version runs the simulator (api.py allows 180s)
 
@@ -23,16 +23,12 @@ async function api(path, ms = QUICK_MS) {
 
 const withImages = (cams) => cams.map((c) => ({ ...c, image: cameraImages[c.camera_id] }))
 
-const query = (mode, sep = '?') => (mode ? `${sep}mode=${mode}` : '')
-
-export function loadFixtures(mode = '') {
+export function loadFixtures() {
   return {
-    mode,
-    stale: Boolean(mode),
-    headline: mode ? fxEnginesHeadline : fxHeadline,
+    headline: fxHeadline,
     source: 'fixtures',
-    baseline: { summary: fxSummary, results: fxResults },
-    agent: null,
+    baseline: fxBaseline,
+    agent: fxAgent,
     posts: fxPosts,
     slowNbhds: new Set(fxSlow.nbhds),
     neighborhoods: JSON.parse(neighborhoods),
@@ -40,10 +36,10 @@ export function loadFixtures(mode = '') {
   }
 }
 
-async function replayOf(version, mode) {
+async function replayOf(version) {
   const [summary, results] = await Promise.all([
-    api(`/summary/${version}?split=${SPLIT}${query(mode, '&')}`, SIM_MS),
-    api(`/results/${version}?split=${SPLIT}${query(mode, '&')}`, SIM_MS),
+    api(`/summary/${version}?split=${SPLIT}&mode=${MODE}`, SIM_MS),
+    api(`/results/${version}?split=${SPLIT}&mode=${MODE}`, SIM_MS),
   ])
   return { version, summary, results }
 }
@@ -53,10 +49,10 @@ function bestAgent(versions) {
 }
 
 // Resolves to the fields the API could serve; the caller merges them over the fixtures.
-export async function loadLive(mode = '') {
-  const live = { mode }
+export async function loadLive() {
+  const live = {}
   const [posts, slow, cameras, versions, headline] = await Promise.allSettled([
-    api('/posts'), api('/slow'), api('/cameras'), api(`/versions${query(mode)}`), api(`/headline${query(mode)}`),
+    api('/posts'), api('/slow'), api('/cameras'), api(`/versions?mode=${MODE}`), api(`/headline?mode=${MODE}`),
   ])
   if (headline.status === 'fulfilled') live.headline = headline.value
   if (posts.status === 'fulfilled') live.posts = posts.value
@@ -65,16 +61,13 @@ export async function loadLive(mode = '') {
 
   const agentVersion = versions.status === 'fulfilled' ? bestAgent(versions.value) : null
   const [baseline, agent] = await Promise.allSettled([
-    replayOf('baseline', mode),
-    agentVersion ? replayOf(agentVersion, mode) : Promise.reject(new Error('no accepted agent version')),
+    replayOf('baseline'),
+    agentVersion ? replayOf(agentVersion) : Promise.reject(new Error('no accepted agent version')),
   ])
-  if (baseline.status === 'fulfilled') {
-    live.baseline = baseline.value
-    live.stale = false
-  }
+  if (baseline.status === 'fulfilled') live.baseline = baseline.value
   if (agent.status === 'fulfilled') live.agent = agent.value
 
-  if (Object.keys(live).length > 1) live.source = 'api'
+  if (Object.keys(live).length) live.source = 'api'
   return live
 }
 
