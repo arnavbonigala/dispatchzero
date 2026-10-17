@@ -8,6 +8,8 @@ import fxPosts from '@fixtures/posts.json'
 import fxCameras from '@fixtures/cameras.json'
 import cameraImages from '@fixtures/camera_images.json'
 import fxSlow from '@fixtures/slow_nbhds.json'
+import fxPolice from '@fixtures/police_tuesday.json'
+import fxCrashes from '@fixtures/crash_hotspots.json'
 import neighborhoods from '@fixtures/neighborhoods.geojson?raw'
 
 const SPLIT = 'frozen'
@@ -33,6 +35,9 @@ export function loadFixtures() {
     slowNbhds: new Set(fxSlow.nbhds),
     neighborhoods: JSON.parse(neighborhoods),
     cameras: withImages(fxCameras),
+    policeFixture: fxPolice,
+    crashes: fxCrashes,
+    liveIncidents: { fetched_at: null, police: [], chp: [] },
   }
 }
 
@@ -51,13 +56,16 @@ function bestAgent(versions) {
 // Resolves to the fields the API could serve; the caller merges them over the fixtures.
 export async function loadLive() {
   const live = {}
-  const [posts, slow, cameras, versions, headline] = await Promise.allSettled([
+  const [posts, slow, cameras, versions, headline, crashes, incidents] = await Promise.allSettled([
     api('/posts'), api('/slow'), api('/cameras'), api(`/versions?mode=${MODE}`), api(`/headline?mode=${MODE}`),
+    api('/incidents/crashes'), api('/incidents/live'),
   ])
   if (headline.status === 'fulfilled') live.headline = headline.value
   if (posts.status === 'fulfilled') live.posts = posts.value
   if (slow.status === 'fulfilled') live.slowNbhds = new Set(slow.value.nbhds)
   if (cameras.status === 'fulfilled') live.cameras = withImages(cameras.value)
+  if (crashes.status === 'fulfilled') live.crashes = crashes.value
+  if (incidents.status === 'fulfilled') live.liveIncidents = incidents.value
 
   const agentVersion = versions.status === 'fulfilled' ? bestAgent(versions.value) : null
   const [baseline, agent] = await Promise.allSettled([
@@ -69,6 +77,15 @@ export async function loadLive() {
 
   if (Object.keys(live).length) live.source = 'api'
   return live
+}
+
+// SFPD dispatched calls on one frozen-week day, and the latest live SFPD + CHP refresh. See backend/incidents.py.
+export async function loadPolice(day) {
+  return api(`/incidents/police?day=${day}`)
+}
+
+export async function loadLiveIncidents() {
+  return api('/incidents/live')
 }
 
 export async function loadCameras() {

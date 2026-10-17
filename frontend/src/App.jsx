@@ -3,13 +3,14 @@ import CityMap from './CityMap'
 import DispatchPanel from './DispatchPanel'
 import VersionLog from './VersionLog.jsx'
 import CallFlow from './CallFlow.jsx'
-import { dispatchIncident, loadCameras, loadFixtures, loadLive } from './data'
+import { dispatchIncident, loadCameras, loadFixtures, loadLive, loadLiveIncidents, loadPolice } from './data'
 import { C, clock, mmss, secOfDay } from './format'
 import './App.css'
 
 const DAY_S = 24 * 3600
 const SPEEDS = [300, 600, 1800, 3600]
 const CAMERA_POLL_MS = 30000
+const INCIDENT_POLL_MS = 120000
 
 function useData() {
   const [data, setData] = useState(loadFixtures)
@@ -19,13 +20,37 @@ function useData() {
     const id = setInterval(() => {
       loadCameras().then((cameras) => alive && setData((d) => ({ ...d, cameras }))).catch(() => {})
     }, CAMERA_POLL_MS)
+    const inc = setInterval(() => {
+      loadLiveIncidents().then((liveIncidents) => alive && setData((d) => ({ ...d, liveIncidents }))).catch(() => {})
+    }, INCIDENT_POLL_MS)
     return () => {
       alive = false
       clearInterval(id)
+      clearInterval(inc)
     }
   }, [])
   return data
 }
+
+// SFPD calls for the replay day from the API, else the bundled Tuesday fixture
+function usePolice(day, fixture) {
+  const [rows, setRows] = useState({ day: null, police: [] })
+  useEffect(() => {
+    let alive = true
+    loadPolice(day).then((police) => alive && setRows({ day, police })).catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [day])
+  if (rows.day === day && rows.police.length) return rows.police
+  return fixture.day === day ? fixture.police : []
+}
+
+const LAYERS = [
+  ['police', 'SFPD calls', C.police],
+  ['chp', 'CHP freeway, live', C.gold],
+  ['crashes', 'injury-crash hotspots', C.bad],
+]
 
 // Frozen results span a week; the replay plays one day of it. Prefer a Tuesday (the demo script's day).
 function daysOf(results) {
@@ -198,9 +223,16 @@ function Timeline({ now, setNow, playing, toggle, speed, setSpeed, day, days, se
   )
 }
 
-function Legend() {
+function Legend({ show, setShow }) {
   return (
     <ul className="legend glass">
+      <li className="legend-toggles" role="group" aria-label="Incident layers">
+        {LAYERS.map(([k, label, color]) => (
+          <button key={k} aria-pressed={show[k]} onClick={() => setShow((s) => ({ ...s, [k]: !s[k] }))}>
+            <i style={{ background: color }} /> {label}
+          </button>
+        ))}
+      </li>
       <li><i style={{ background: C.good }} /> ≤ 8 min</li>
       <li><i style={{ background: C.warn }} /> 8–12 min</li>
       <li><i style={{ background: C.bad }} /> &gt; 12 min</li>
@@ -224,6 +256,8 @@ const SOURCES = [
   ['', 'Lookahead: coverage of the next hour\'s expected calls before each dispatch'],
   ['11', 'hospitals with real handoff times'],
   ['33', 'live Caltrans freeway cameras'],
+  ['2,813', 'urgent SFPD calls in the unseen week, plus live SFPD and CHP incidents'],
+  ['16,689', 'injury crashes since 2021, as hotspots'],
   ['840', 'hours of weather, rain and temperature'],
   ['41', 'neighborhoods with population and share 65+'],
   ['', 'Each engine\'s hourly workload, and demand by hour and area'],
@@ -265,6 +299,10 @@ export default function App() {
   const day = days.includes(pickedDay) ? pickedDay : initial
 
   const dispatch = useDispatch(day, playback)
+  const police = usePolice(day, data.policeFixture)
+  const [show, setShow] = useState({ police: true, chp: true, crashes: false })
+  const incidents = useMemo(() => ({ police, chp: data.liveIncidents.chp ?? [], crashes: data.crashes.hotspots ?? [] }),
+    [police, data.liveIncidents, data.crashes])
   const [camera, setCamera] = useState(null)
   const jam = useMemo(() => {
     const r = dispatch.state.result
@@ -289,7 +327,7 @@ export default function App() {
         <CityMap calls={dispatching ? [] : calls} now={playback.now} cameras={data.cameras} posts={data.posts}
           neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}
           onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
-          camera={camera} onCamera={setCamera} jam={jam} />
+          camera={camera} onCamera={setCamera} jam={jam} incidents={incidents} show={show} />
       </div>
       <div className="left">
         <header className="top glass">
@@ -307,7 +345,7 @@ export default function App() {
         </header>
         <Hero headline={data.headline} />
       </div>
-      <Legend />
+      <Legend show={show} setShow={setShow} />
       <aside className="side glass">
         <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
           onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))}>

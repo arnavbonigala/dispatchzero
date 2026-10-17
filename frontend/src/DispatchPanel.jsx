@@ -24,6 +24,30 @@ const TRAFFIC = {
   cameras: 'Caltrans freeway cameras',
   osm: 'learned road speeds (no Google key)',
 }
+const SOURCE = { cameras: 'Caltrans freeway cameras', chp: 'CHP incidents' }
+
+function trafficLabel(r) {
+  if (r.traffic !== 'cameras') return TRAFFIC[r.traffic] ?? TRAFFIC.osm
+  const names = (r.traffic_sources ?? ['cameras']).map((s) => SOURCE[s]).filter(Boolean)
+  return `${names.join(' + ')}${r.cameras_ts ? ` (readings ${r.cameras_ts.slice(11, 16)})` : ''}`
+}
+
+function Warnings({ items }) {
+  if (!items?.length) return null
+  return (
+    <div className="dp-warn" role="note" aria-label="Nearby incidents">
+      <h3>Nearby</h3>
+      <ul>
+        {items.map((w) => (
+          <li key={w.id} className={w.safety ? 'safety' : w.source}>
+            <b>{w.safety && 'Weapon or violence: '}{w.source === 'chp' ? 'CHP' : 'Police'} · {w.title}</b>
+            <span>{w.place} · {w.distance_m} m away · {w.live ? 'live now' : `${w.minutes_before} min earlier`}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
 
 export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch, children }) {
   const { armed, loading, error, result } = state
@@ -53,6 +77,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch
           <p className="dp-where">
             <b>{result.incident.nbhd}</b> · {clock(Number(result.incident.t.slice(11, 13)) * 3600 + Number(result.incident.t.slice(14, 16)) * 60)}
           </p>
+          <Warnings items={result.warnings} />
           {children}
           <div className="dp-compare">
             <Side title="Baseline" side={result.baseline} />
@@ -73,8 +98,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch
             </div>
           </div>
           <p className="dp-foot">
-            Traffic: {TRAFFIC[result.traffic] ?? TRAFFIC.osm}
-            {result.traffic === 'cameras' && result.cameras_ts && ` (readings ${result.cameras_ts.slice(11, 16)})`} ·{' '}
+            Traffic: {trafficLabel(result)} ·{' '}
             <button className="dp-link" onClick={onReplay}>Replay</button>
           </p>
         </>

@@ -13,6 +13,7 @@ export const C = {
   ink: '#ecebe7',
   surface: '#16191e',
   gold: '#e3b04b',
+  police: '#5fb6c9',
 }
 
 export function rgb(hex, a = 255) {

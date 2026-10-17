@@ -43,6 +43,10 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 .legend i.sq { border-radius: 2px; border: 1.5px solid; }
 .legend i.ring { border: 2px solid; }
+.legend-toggles { grid-column: 1 / -1; display: flex !important; flex-wrap: wrap; gap: 4px !important; padding-bottom: 6px; margin-bottom: 2px; border-bottom: 1px solid var(--border); }
+.legend-toggles button { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 0.7rem; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
+.legend-toggles button[aria-pressed='true'] { background: var(--raise); color: var(--ink); }
+.legend-toggles button[aria-pressed='false'] i { opacity: 0.35; }
 .legend i.bar { width: 5px; height: 13px; border-radius: 1px; background: linear-gradient(to top, var(--good), #d9a54a, var(--bad)); }
 
 .side {
@@ -116,6 +120,13 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .dp-traffic p { margin: 0; }
 .dp-watch { justify-self: start; font: inherit; font-size: 0.78rem; font-weight: 600; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); cursor: pointer; }
 .dp-watch::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--bad); }
+.dp-warn { padding: 10px 12px; border-radius: 8px; background: var(--raise); box-shadow: inset 3px 0 0 #5fb6c9; }
+.dp-warn h3 { margin: 0 0 6px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.dp-warn ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.dp-warn li { display: grid; gap: 1px; font-size: 0.8rem; }
+.dp-warn li span { color: var(--muted); font-size: 0.74rem; }
+.dp-warn li.safety b { color: var(--bad); }
+.dp-warn li.chp b { color: #e3b04b; }
 .dp-hosp { display: flex; gap: 10px; align-items: center; font-size: 0.8rem; }
 .dp-hosp div { display: grid; }
 .dp-hosp span:not(.dp-h) { color: var(--muted); font-size: 0.75rem; }

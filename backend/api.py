@@ -97,6 +97,35 @@ def cameras():
     return [{**r, "stream": r.get("stream") or streams.get(r["camera_id"])} for r in rows]
 
 
+@app.get("/incidents/live")
+def incidents_live():
+    """Latest incidents.py refresh: SFPD calls from the last few hours and CHP incidents in SF. Empty when stale."""
+    import incidents
+
+    d = incidents.live()
+    return {"fetched_at": d.get("fetched_at"), "police": d.get("police", []), "chp": d.get("chp", [])}
+
+
+@app.get("/incidents/police")
+def incidents_police(day: str):
+    """SFPD dispatched calls on one frozen-week day, for the replay map."""
+    import incidents
+
+    if not re.fullmatch(r"\d{4}-\d\d-\d\d", day):
+        raise HTTPException(400, "day must look like 2026-10-06")
+    rows = incidents.frozen_police(day)
+    if not rows:
+        fx = incidents.read_json(FIXTURES / "police_tuesday.json") or {}
+        rows = fx.get("police", []) if fx.get("day") == day else []
+    return rows
+
+
+@app.get("/incidents/crashes")
+def incidents_crashes():
+    """Injury-crash hotspots: about 220 m cells with 3 or more crashes since 2021."""
+    return load_json(DATA / "crash_hotspots.json", FIXTURES / "crash_hotspots.json")
+
+
 @app.get("/posts")
 def posts():
     return load_json(DATA / "posts.json", FIXTURES / "posts.json")

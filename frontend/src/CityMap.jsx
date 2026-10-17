@@ -4,11 +4,12 @@ import { MapboxOverlay } from '@deck.gl/mapbox'
 import { ArcLayer, ColumnLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import CameraCard from './CameraCard'
-import { C, mmss, responseColor, rgb, slowdownColor } from './format'
+import { C, clock, mmss, responseColor, rgb, secOfDay, slowdownColor } from './format'
 
 const STYLE = 'https://tiles.openfreemap.org/styles/dark'
 const RECENT_S = 3600
 const GROW_S = 240
+const POLICE_S = 1800 // SFPD calls stay on the map for 30 replay minutes, fading
 const narrow = () => typeof window !== 'undefined' && window.innerWidth < 900
 const VIEW = { longitude: -122.447, latitude: 37.757, zoom: narrow() ? 11 : 11.7, pitch: 0, bearing: 0 }
 const TILT = { pitch: 55, bearing: -17 }
@@ -99,10 +100,16 @@ function tooltip({ layer, object }) {
   } else if (id === 'units') text = `${object.engine ? 'Engine' : 'Ambulance'} ${object.unit} → ${object.c.nbhd}`
   else if (id === 'cameras') text = `${object.name}\nClick for the live camera`
   else if (id === 'd-units') text = object.label
+  else if (id === 'crashes') text = `${object.n} injury crashes since 2021\n${object.severe} severe or fatal`
+  else if (id === 'police' || id === 'd-warn') {
+    const src = object.source === 'chp' ? 'CHP' : 'SFPD'
+    const when = object.live ? 'live now' : object.source === 'chp' ? `live · ${object.t.slice(11, 16)}` : clock(secOfDay(object.t))
+    text = `${object.safety ? 'Weapon or violence · ' : ''}${src} · ${object.title}${object.priority ? ` (priority ${object.priority})` : ''}\n${object.place} · ${when}`
+  } else if (id === 'chp') text = `CHP live · ${object.title}\n${object.place} · ${object.t.slice(11, 16)}`
   return text && { text, style }
 }
 
-export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, cameras, armed, onPick, result, elapsed, camera, onCamera, jam }) {
+export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, cameras, armed, onPick, result, elapsed, camera, onCamera, jam, incidents, show }) {
   const mapRef = useRef(null)
   const [flat, setFlat] = useState(true)
   const wave = 0.5 + 0.5 * Math.sin(elapsed / 8)
@@ -115,6 +122,10 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
   const hospital = result?.hospital
   const toHospital = gm && hospital ? Math.max(0, elapsed - gm.chosen.eta_s) : 0
   const incident = result && [result.incident.lon, result.incident.lat]
+  const police = useMemo(() => (show.police
+    ? incidents.police.map((p) => ({ ...p, s: secOfDay(p.t) })).filter((p) => p.s <= now && p.s > now - POLICE_S)
+    : []), [incidents.police, show.police, now])
+  const warnings = result?.warnings ?? []
 
   const layers = [
     new GeoJsonLayer({
@@ -123,6 +134,11 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
       getLineColor: (f) => (slowNbhds.has(f.properties.nhood) ? rgb(C.slow, 230) : [148, 163, 184, 46]),
       getLineWidth: (f) => (slowNbhds.has(f.properties.nhood) ? 1.6 : 0.8),
       updateTriggers: { getFillColor: [slowNbhds], getLineColor: [slowNbhds], getLineWidth: [slowNbhds] },
+    }),
+    new ScatterplotLayer({
+      id: 'crashes', data: show.crashes ? incidents.crashes : [], pickable: true, radiusUnits: 'meters',
+      getPosition: (h) => [h.lon, h.lat], getRadius: (h) => 45 + 14 * Math.sqrt(h.n),
+      getFillColor: (h) => rgb(C.bad, Math.min(190, 35 + h.n * 2)),
     }),
     new ColumnLayer({
       id: 'posts', data: posts, pickable: true, extruded: true, diskResolution: 6, radius: 38,
@@ -161,6 +177,23 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
       id: 'cameras', data: cameras, pickable: true, stroked: true, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
       getPosition: (c) => [c.lon, c.lat], getRadius: 6, getFillColor: (c) => rgb(slowdownColor(c.slowdown), 235),
       getLineColor: [15, 23, 42, 255], getLineWidth: 2,
+    }),
+    new ScatterplotLayer({
+      id: 'police', data: police, pickable: true, stroked: true, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
+      getPosition: (p) => [p.lon, p.lat], getRadius: (p) => (p.safety ? 6 : 4),
+      getFillColor: (p) => rgb(p.crash ? C.warn : C.police, Math.round(70 + 170 * (1 - (now - p.s) / POLICE_S))),
+      getLineColor: (p) => (p.safety ? rgb(C.bad) : [15, 23, 42, 200]), getLineWidth: (p) => (p.safety ? 2 : 1),
+      updateTriggers: { getFillColor: [Math.floor(now / 60)] },
+    }),
+    new ScatterplotLayer({
+      id: 'chp', data: show.chp ? incidents.chp : [], pickable: true, stroked: true, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
+      getPosition: (c) => [c.lon, c.lat], getRadius: (c) => (c.crash ? 8 : 6), getFillColor: rgb(C.gold),
+      getLineColor: [15, 23, 42, 255], getLineWidth: 2,
+    }),
+    new ScatterplotLayer({
+      id: 'd-warn', data: warnings, pickable: true, stroked: true, filled: false, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
+      getPosition: (w) => [w.lon, w.lat], getRadius: 11 + 3 * wave, getLineColor: (w) => (w.safety ? rgb(C.bad) : rgb(w.source === 'chp' ? C.gold : C.police)),
+      getLineWidth: 2, updateTriggers: { getRadius: [wave] },
     }),
     new ScatterplotLayer({
       id: 'jam', data: jam ? cameras.filter((c) => c.camera_id === jam.camera_id) : [], stroked: true, filled: false,
