@@ -191,16 +191,18 @@ function Legend() {
 
 const SOURCES = [
   ['8,607', 'SF 911 ambulance calls over 5 weeks'],
-  ['10,668', 'dispatches by 57 ambulances, with shift patterns'],
-  ['9,998', 'dispatches by 34 paramedic fire engines'],
+  ['10,668', 'dispatches by 57 ambulances'],
+  ['9,998', 'dispatches by 34 paramedic fire engines, with locations'],
   ['62%', 'of calls flagged life-threatening'],
   ['10,033', 'intersections in the road network'],
-  ['', 'Road speeds learned per neighborhood and time of day'],
+  ['5,165', 'real drives train its drive-time model (error 253 s → 197 s)'],
+  ['34,440', 'neighborhood-hour demand predictions from time, weather and demographics'],
+  ['', 'Lookahead: coverage of the next hour\'s expected calls before each dispatch'],
   ['11', 'hospitals with real handoff times'],
   ['33', 'live Caltrans freeway cameras'],
   ['840', 'hours of weather, rain and temperature'],
   ['41', 'neighborhoods with population and share 65+'],
-  ['', 'Demand by hour and area, and each engine\'s hourly workload'],
+  ['', 'Each engine\'s hourly workload, and demand by hour and area'],
 ]
 
 function Sources() {
