@@ -7,6 +7,8 @@ import fxPosts from '@fixtures/posts.json'
 import fxCameras from '@fixtures/cameras.json'
 import cameraImages from '@fixtures/camera_images.json'
 import fxSlow from '@fixtures/slow_nbhds.json'
+import fxHeadline from '@fixtures/headline.json'
+import fxEnginesHeadline from '@fixtures/engines_headline.json'
 import neighborhoods from '@fixtures/neighborhoods.geojson?raw'
 
 const SPLIT = 'frozen'
@@ -21,8 +23,13 @@ async function api(path, ms = QUICK_MS) {
 
 const withImages = (cams) => cams.map((c) => ({ ...c, image: cameraImages[c.camera_id] }))
 
-export function loadFixtures() {
+const query = (mode, sep = '?') => (mode ? `${sep}mode=${mode}` : '')
+
+export function loadFixtures(mode = '') {
   return {
+    mode,
+    stale: Boolean(mode),
+    headline: mode ? fxEnginesHeadline : fxHeadline,
     source: 'fixtures',
     baseline: { summary: fxSummary, results: fxResults },
     agent: null,
@@ -33,10 +40,10 @@ export function loadFixtures() {
   }
 }
 
-async function replayOf(version) {
+async function replayOf(version, mode) {
   const [summary, results] = await Promise.all([
-    api(`/summary/${version}?split=${SPLIT}`, SIM_MS),
-    api(`/results/${version}?split=${SPLIT}`, SIM_MS),
+    api(`/summary/${version}?split=${SPLIT}${query(mode, '&')}`, SIM_MS),
+    api(`/results/${version}?split=${SPLIT}${query(mode, '&')}`, SIM_MS),
   ])
   return { version, summary, results }
 }
@@ -46,24 +53,28 @@ function bestAgent(versions) {
 }
 
 // Resolves to the fields the API could serve; the caller merges them over the fixtures.
-export async function loadLive() {
-  const live = {}
-  const [posts, slow, cameras, versions] = await Promise.allSettled([
-    api('/posts'), api('/slow'), api('/cameras'), api('/versions'),
+export async function loadLive(mode = '') {
+  const live = { mode }
+  const [posts, slow, cameras, versions, headline] = await Promise.allSettled([
+    api('/posts'), api('/slow'), api('/cameras'), api(`/versions${query(mode)}`), api(`/headline${query(mode)}`),
   ])
+  if (headline.status === 'fulfilled') live.headline = headline.value
   if (posts.status === 'fulfilled') live.posts = posts.value
   if (slow.status === 'fulfilled') live.slowNbhds = new Set(slow.value.nbhds)
   if (cameras.status === 'fulfilled') live.cameras = withImages(cameras.value)
 
   const agentVersion = versions.status === 'fulfilled' ? bestAgent(versions.value) : null
   const [baseline, agent] = await Promise.allSettled([
-    replayOf('baseline'),
-    agentVersion ? replayOf(agentVersion) : Promise.reject(new Error('no accepted agent version')),
+    replayOf('baseline', mode),
+    agentVersion ? replayOf(agentVersion, mode) : Promise.reject(new Error('no accepted agent version')),
   ])
-  if (baseline.status === 'fulfilled') live.baseline = baseline.value
+  if (baseline.status === 'fulfilled') {
+    live.baseline = baseline.value
+    live.stale = false
+  }
   if (agent.status === 'fulfilled') live.agent = agent.value
 
-  if (Object.keys(live).length) live.source = 'api'
+  if (Object.keys(live).length > 1) live.source = 'api'
   return live
 }
 

@@ -76,27 +76,33 @@ function Feed({ versions }) {
   )
 }
 
-export default function VersionLog() {
+const FIXTURES = {
+  '': () => import('@fixtures/versions.jsonl?raw'),
+  engines: () => import('@fixtures/engines_versions.jsonl?raw'),
+}
+
+export default function VersionLog({ mode = '' }) {
   const [versions, setVersions] = useState(null)
   const [error, setError] = useState(null)
   useEffect(() => {
-    const fixture = () => import('@fixtures/versions.jsonl?raw')
+    setVersions(null)
+    const fixture = () => FIXTURES[mode]()
       .then((m) => setVersions(m.default.trim().split('\n').map((l) => JSON.parse(l))))
       .catch(() => setError('Versions unavailable'))
-    const load = () => fetch('/api/versions').then((r) => {
+    const load = () => fetch(`/api/versions${mode ? `?mode=${mode}` : ''}`).then((r) => {
       if (!r.ok) throw new Error(r.status)
       return r.json()
     }).then(setVersions).catch(fixture)
     load()
     const id = setInterval(load, 10000)
     return () => clearInterval(id)
-  }, [])
+  }, [mode])
   if (error && !versions) return <p className="vl-empty" role="alert">{error}</p>
   if (!versions) return <p className="vl-empty">Loading…</p>
   const accepted = versions.filter((v) => v.accepted).length - 1
   return (
     <section className="vl" aria-labelledby="vl-title">
-      <h2 id="vl-title">Agent versions</h2>
+      <h2 id="vl-title">Agent versions{mode ? ' · with fire engines' : ''}</h2>
       <p className="vl-sub">{versions.length - 1} candidates, {accepted} accepted. Dots: median response in the 10 slowest neighborhoods (training weeks). Line: best accepted so far.</p>
       <VersionChart versions={versions} />
       <h3>Diagnosis feed</h3>

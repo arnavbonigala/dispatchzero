@@ -37,8 +37,12 @@ export default function ReplayMap({ calls, now, posts, neighborhoods, slowNbhds,
 
       {calls.map((c) => {
         if (now < c.start) return null
+        const engine = c.engine_unit && c.engine_s <= c.ambulance_s
+        const unit = engine ? c.engine_unit : c.unit
+        const eta = engine ? c.engine_eta_s : c.eta_s
+        const color = engine ? C.engine : C.unit
         const arrive = c.start + c.response_s
-        const driveStart = arrive - c.eta_s
+        const driveStart = arrive - eta
         const scene = [c.lat, c.lon]
 
         if (now >= arrive) {
@@ -48,26 +52,26 @@ export default function ReplayMap({ calls, now, posts, neighborhoods, slowNbhds,
               pathOptions={{ stroke: false, fillColor: responseColor(c.response_s), fillOpacity: recent ? 0.9 : 0.35 }}>
               <Popup>
                 <b>{c.nbhd}</b><br />
-                {c.unit} from post {c.from_post}<br />
-                Response {mmss(c.response_s)} · drive {mmss(c.eta_s)}<br />
+                {engine ? `Engine ${unit} first, ${c.unit} following` : `${c.unit} from post ${c.from_post}`}<br />
+                Response {mmss(c.response_s)} · drive {mmss(eta)}<br />
                 Historical {mmss(c.historical_s)}
               </Popup>
             </CircleMarker>
           )
         }
 
-        const from = postAt(c.from_post)
+        const from = postAt(engine ? c.engine_post : c.from_post)
         const driving = now >= driveStart && from
-        const k = driving ? (now - driveStart) / c.eta_s : 0
+        const k = driving ? (now - driveStart) / eta : 0
         const unitAt = driving && [from[0] + (scene[0] - from[0]) * k, from[1] + (scene[1] - from[1]) * k]
         return [
           <CircleMarker key={`${c.call_id}-ring`} center={scene} radius={9}
             pathOptions={{ color: C.bad, weight: 2, fillColor: C.bad, fillOpacity: 0.15, className: 'pulse' }} />,
           driving && <Polyline key={`${c.call_id}-line`} positions={[from, scene]}
-            pathOptions={{ color: C.unit, weight: 1.5, dashArray: '4 4', opacity: 0.7 }} />,
+            pathOptions={{ color, weight: 1.5, dashArray: '4 4', opacity: 0.7 }} />,
           driving && <CircleMarker key={`${c.call_id}-unit`} center={unitAt} radius={5}
-            pathOptions={{ color: C.surface, weight: 1.5, fillColor: C.unit, fillOpacity: 1 }}>
-            <Tooltip>{c.unit} → {c.nbhd}</Tooltip>
+            pathOptions={{ color: C.surface, weight: 1.5, fillColor: color, fillOpacity: 1 }}>
+            <Tooltip>{unit} → {c.nbhd}</Tooltip>
           </CircleMarker>,
         ]
       })}

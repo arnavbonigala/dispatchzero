@@ -9,11 +9,12 @@ const DAY_S = 24 * 3600
 const SPEEDS = [300, 600, 1800, 3600]
 const CAMERA_POLL_MS = 30000
 
-function useData() {
+function useData(mode) {
   const [data, setData] = useState(loadFixtures)
   useEffect(() => {
     let alive = true
-    loadLive().then((live) => alive && setData((d) => ({ ...d, ...live })))
+    setData((d) => ({ ...d, ...loadFixtures(mode), agent: null }))
+    loadLive(mode).then((live) => alive && setData((d) => ({ ...d, ...live })))
     const id = setInterval(() => {
       loadCameras().then((cameras) => alive && setData((d) => ({ ...d, cameras }))).catch(() => {})
     }, CAMERA_POLL_MS)
@@ -21,7 +22,7 @@ function useData() {
       alive = false
       clearInterval(id)
     }
-  }, [])
+  }, [mode])
   return data
 }
 
@@ -80,10 +81,31 @@ function Stat({ label, value, sub, tone }) {
   )
 }
 
-function Compare({ baseline, agent }) {
+const faster = (diff) => `${mmss(Math.abs(diff))} ${diff <= 0 ? 'faster' : 'slower'}`
+
+function Headline({ headline, mode }) {
+  if (!headline?.vs_baseline) return null
+  const g = headline.vs_baseline
+  return (
+    <p className={`headline ${mode ? 'engines' : ''}`}>
+      <span>Agent {headline.version} on a week it never saw{mode ? ', first paramedic on scene' : ''}:</span>
+      <span><b>{faster(g.slow_nbhds.median_diff_s)}</b> in the 10 slowest neighborhoods</span>
+      <span><b>{faster(g.everyone.median_diff_s)}</b> citywide</span>
+    </p>
+  )
+}
+
+function Compare({ baseline, agent, stale }) {
   const b = baseline.summary
   const a = agent?.summary
   const delta = a && a.slow_median_s - b.slow_median_s
+  if (stale) {
+    return (
+      <section className="compare" aria-label="Baseline versus agent">
+        <p className="pending" role="status">Replaying the week with fire engines…</p>
+      </section>
+    )
+  }
   return (
     <section className="compare" aria-label="Baseline versus agent">
       <div className="compare-col">
@@ -96,8 +118,8 @@ function Compare({ baseline, agent }) {
         {a ? (
           <>
             <Stat label="10 slowest neighborhoods" value={mmss(a.slow_median_s)}
-              sub={`${delta <= 0 ? '−' : '+'}${mmss(Math.abs(delta))} vs baseline`} tone="slow" />
-            <Stat label="Citywide" value={mmss(a.median_s)} sub={`median · ${a.n} calls`} />
+              sub={`${faster(delta)} vs baseline`} tone="slow" />
+            <Stat label="Citywide" value={mmss(a.median_s)} sub={`${faster(a.median_s - b.median_s)} vs baseline`} />
           </>
         ) : (
           <p className="pending">Waiting for an agent replay of this week.</p>
@@ -106,6 +128,8 @@ function Compare({ baseline, agent }) {
     </section>
   )
 }
+
+const engineFirst = (c) => c.engine_unit && c.engine_s <= c.ambulance_s
 
 function Feed({ calls, now, slowNbhds }) {
   const recent = calls.filter((c) => c.start <= now).slice(-8).reverse()
@@ -122,7 +146,7 @@ function Feed({ calls, now, slowNbhds }) {
               <span className="feed-place">
                 {c.nbhd}
                 {slowNbhds.has(c.nbhd) && <em className="tag">slow 10</em>}
-                <small>{c.unit} from post {c.from_post}</small>
+                <small>{engineFirst(c) ? `Engine ${c.engine_unit} first · ${c.unit} following` : `${c.unit} from post ${c.from_post}`}</small>
               </span>
               <span className="feed-resp" style={{ color: done ? responseColor(c.response_s) : C.unit }}>
                 {done ? mmss(c.response_s) : 'en route'}
@@ -176,16 +200,27 @@ function Timeline({ now, setNow, playing, toggle, speed, setSpeed, day, days, se
   )
 }
 
-function Legend() {
+function Legend({ mode }) {
   return (
     <ul className="legend">
       <li><i style={{ background: C.good }} /> ≤ 8 min</li>
       <li><i style={{ background: C.warn }} /> 8–12 min</li>
       <li><i style={{ background: C.bad }} /> &gt; 12 min</li>
       <li><i style={{ background: C.unit }} /> ambulance en route</li>
+      {mode && <li><i style={{ background: C.engine }} /> fire engine en route</li>}
       <li><i className="sq" style={{ borderColor: C.slow, background: `${C.slow}22` }} /> slowest 10 neighborhoods</li>
       <li><i className="ring" style={{ borderColor: C.ink }} /> freeway camera</li>
     </ul>
+  )
+}
+
+function ModeToggle({ mode, setMode }) {
+  return (
+    <div className="toggle" role="group" aria-label="Units the dispatcher can send">
+      {[['', 'Ambulances'], ['engines', '+ Fire engines']].map(([m, label]) => (
+        <button key={label} aria-pressed={mode === m} onClick={() => setMode(m)}>{label}</button>
+      ))}
+    </div>
   )
 }
 
@@ -202,7 +237,8 @@ function ViewToggle({ view, setView, agent }) {
 }
 
 export default function App() {
-  const data = useData()
+  const [mode, setMode] = useState('')
+  const data = useData(mode)
   const playback = usePlayback()
   const [view, setView] = useState('baseline')
   const [pickedDay, setDay] = useState(null)
@@ -229,20 +265,24 @@ export default function App() {
             Replay of real SF ambulance calls · {data.baseline.summary.split} week
             <span className={`source ${data.source}`}>{data.source === 'api' ? 'live API' : 'fixtures'}</span>
           </p>
-          <ViewToggle view={view} setView={setView} agent={data.agent} />
+          <div className="toggles">
+            <ModeToggle mode={mode} setMode={setMode} />
+            <ViewToggle view={view} setView={setView} agent={data.agent} />
+          </div>
         </div>
-        <Compare baseline={data.baseline} agent={data.agent} />
+        <Compare baseline={data.baseline} agent={data.agent} stale={data.stale} />
       </header>
+      <Headline headline={data.headline} mode={mode} />
       <main className="body">
         <div className="map-wrap">
           <ReplayMap calls={calls} now={playback.now} cameras={data.cameras} posts={data.posts}
             neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} />
-          <Legend />
+          <Legend mode={mode} />
         </div>
         <aside className="side">
           <Live calls={calls} now={playback.now} slowNbhds={data.slowNbhds} />
           <Feed calls={calls} now={playback.now} slowNbhds={data.slowNbhds} />
-          <VersionLog />
+          <VersionLog mode={mode} />
         </aside>
       </main>
       <Timeline {...playback} day={day} days={days} setDay={setDay} />
