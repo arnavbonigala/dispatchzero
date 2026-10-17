@@ -1,4 +1,5 @@
 import argparse
+import difflib
 import json
 import re
 import subprocess
@@ -341,6 +342,18 @@ def snapshot(best):
     (FIXTURES / "engines_versions.jsonl").write_text(VERSIONS.read_text())
     if LESSONS.exists():
         (FIXTURES / "engines_lessons.md").write_text(LESSONS.read_text())
+    write_diffs()
+
+
+def write_diffs():
+    rows = [json.loads(l) for l in VERSIONS.read_text().splitlines() if l.strip()]
+    out = {}
+    for r in rows:
+        src, parent = POLICIES / f"{r['version']}.py", POLICIES / f"{r['parent']}.py"
+        if r["parent"] and src.exists() and parent.exists():
+            lines = difflib.unified_diff(parent.read_text().splitlines(), src.read_text().splitlines(), n=1, lineterm="")
+            out[r["version"]] = "\n".join(l for l in lines if not l.startswith(("---", "+++")))
+    (FIXTURES / "engines_diffs.json").write_text(json.dumps(out))
 
 
 def main():

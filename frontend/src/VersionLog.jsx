@@ -37,11 +37,11 @@ function steps(versions) {
     const gain = i > 0 && v.accepted && m != null ? m - best : null
     if (v.accepted && m != null) [best, bestV] = [m, v.version]
     return { ...v, n: i, m, best, bestV, gain }
-  }).filter((s) => s.m != null)
+  })
 }
 
 function Chart({ pts, sel, setSel }) {
-  const ys = pts.map((p) => p.m)
+  const ys = pts.map((p) => p.m).filter((m) => m != null)
   const lo = Math.min(...ys) - 8
   const hi = Math.max(...ys) + 8
   const x = (i) => PAD.l + (i * (W - PAD.l - PAD.r)) / Math.max(pts.length - 1, 1)
@@ -68,7 +68,57 @@ function Chart({ pts, sel, setSel }) {
   )
 }
 
-function Detail({ s }) {
+const fxDiffs = Object.values(import.meta.glob('../../fixtures/engines_diffs.json', { import: 'default', eager: true }))[0] ?? {}
+
+function gates(s, parent) {
+  const r = s.reason ?? ''
+  const ran = s.train_mean != null
+  const list = [
+    { label: 'Parsed and checked', detail: 'allow-listed imports, no file access', ok: ran, note: ran ? null : r.replace(/^(rejected: )+/, '') },
+    s.review && { label: 'Reviewer', detail: r.startsWith('vetoed') ? 'veto' : 'pass', ok: !r.startsWith('vetoed') },
+    { label: 'Sandboxed run', detail: 'no network, 90 s limit', ok: ran },
+    { label: 'Training weeks', detail: `${mmss(parent?.train_mean)} → ${mmss(s.train_mean)}`, ok: !r.startsWith('train'), note: r.startsWith('train') ? why(r) : null },
+    { label: 'Held-out week', detail: r.startsWith('holdout') || s.holdout_passes === false ? 'failed' : 'passed', ok: !r.startsWith('holdout') && s.holdout_passes !== false, note: r.startsWith('holdout') ? why(r) : null },
+    { label: r.startsWith('beaten') ? 'Another idea this round did better' : 'Kept as the new best', ok: s.accepted },
+  ].filter(Boolean)
+  const fail = list.findIndex((g) => !g.ok)
+  return list.map((g, i) => ({ ...g, state: fail < 0 || i < fail ? 'ok' : i === fail ? 'fail' : 'skip' }))
+}
+
+function Checks({ s, parent }) {
+  return (
+    <ul className="vl-checks" key={s.version} aria-label="Checks this rule went through">
+      {gates(s, parent).map((g, i) => (
+        <li key={g.label} className={`vl-check vl-${g.state}`} style={{ animationDelay: `${i * 140}ms` }}>
+          <span aria-hidden="true">{g.state === 'ok' ? '✓' : g.state === 'fail' ? '✗' : '·'}</span>
+          <span className="sr-only">{g.state === 'ok' ? 'passed' : g.state === 'fail' ? 'failed' : 'not reached'}: </span>
+          <b>{g.label}</b> {g.state !== 'skip' && <em>{g.detail}</em>}
+          {g.state === 'fail' && g.note && <p>{g.note}</p>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Diff({ s }) {
+  const text = fxDiffs[s.version]
+  if (!text) return null
+  const lines = text.split('\n')
+  const add = lines.filter((l) => l.startsWith('+')).length
+  const del = lines.filter((l) => l.startsWith('-')).length
+  return (
+    <figure className="vl-diff">
+      <figcaption>Code it wrote vs {s.parent} <span className="vl-add">+{add}</span> <span className="vl-del">−{del}</span></figcaption>
+      <pre tabIndex={0} aria-label={`Code diff, ${add} lines added, ${del} removed`}>
+        {lines.map((l, i) => (
+          <span key={i} className={l.startsWith('@@') ? 'vl-hunk' : l[0] === '+' ? 'vl-add' : l[0] === '-' ? 'vl-del' : ''}>{l.startsWith('@@') ? '⋯' : l}{'\n'}</span>
+        ))}
+      </pre>
+    </figure>
+  )
+}
+
+function Detail({ s, parent }) {
   if (s.n === 0) return <p className="vl-detail"><strong>Start</strong> Every unit waits at its home post; the closest idle unit is sent.</p>
   return (
     <div className="vl-detail" aria-live="polite">
@@ -78,7 +128,8 @@ function Detail({ s }) {
         {s.gain != null && Math.abs(s.gain) >= 1 && <span className="vl-meta">{mmss(Math.abs(s.gain))} {s.gain <= 0 ? 'faster' : 'slower'}</span>}
       </div>
       <p>{short(s.diagnosis)}</p>
-      {!s.accepted && <p className="vl-reason">{why(s.reason)}</p>}
+      <Diff s={s} />
+      <Checks s={s} parent={parent} />
     </div>
   )
 }
@@ -143,7 +194,7 @@ export default function VersionLog({ onLearn }) {
       <Chart pts={pts} sel={at} setSel={pick} />
       <div className="vl-nav">
         <button onClick={() => pick(at - 1)} disabled={at === 0} aria-label="Previous step">◀</button>
-        <Detail s={pts[at]} />
+        <Detail s={pts[at]} parent={versions.find((v) => v.version === pts[at].parent)} />
         <button onClick={() => pick(at + 1)} disabled={at === pts.length - 1} aria-label="Next step">▶</button>
       </div>
       {lessons.length > 0 && <p className="vl-lesson"><span>Lesson</span> {short(lessons[lessons.length - 1], 140)}</p>}

@@ -730,7 +730,7 @@ def load_calls(split=None):
     return calls.to_dict("records")
 
 
-def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_entry=False, engines=False):
+def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_entry=False, engines=False, probe=None):
     policy = load_policy(policy, world)
     random.seed(POLICY_SEED)
     n_posts = len(world.post_nodes)
@@ -894,6 +894,8 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
             **extra,
             **(ctx if trace else {}),
         })
+        if probe:
+            probe(t, c, [at(u) for u in duty if busy[u] <= t], [world.engines[u] for u in world.engines if ebusy[u] <= t] if engines else [], len(duty))
     return results, stats
 
 
