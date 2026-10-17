@@ -50,7 +50,7 @@ def versions():
 
 @app.get("/headline")
 def headline():
-    return load_json(RUNS / "headline.json")
+    return load_json(RUNS / "headline.json", FIXTURES / "headline.json")
 
 
 @app.get("/summary/{version}")

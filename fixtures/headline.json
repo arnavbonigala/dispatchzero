@@ -1,0 +1,38 @@
+{
+ "version": "v013",
+ "frozen": {
+  "slow_median_s": 682.9,
+  "median_s": 662.55,
+  "mean_s": 717.4,
+  "p90_s": 947.2,
+  "actual_median_s": 658.0,
+  "n": 1708
+ },
+ "baseline": {
+  "slow_median_s": 696.6,
+  "median_s": 659.85,
+  "mean_s": 711.8,
+  "p90_s": 930.3,
+  "actual_median_s": 658.0,
+  "n": 1708
+ },
+ "vs_baseline": {
+  "slow_nbhds": {
+   "median_diff_s": -13.700000000000045,
+   "ci95": [
+    -35.89999999999998,
+    -5.100000000000023
+   ],
+   "n": 287
+  },
+  "everyone": {
+   "median_diff_s": 2.699999999999932,
+   "ci95": [
+    -2.7000000000000455,
+    7.649999999999977
+   ],
+   "n": 1708
+  },
+  "passes": true
+ }
+}
