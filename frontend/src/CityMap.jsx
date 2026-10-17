@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Map, NavigationControl, useControl } from 'react-map-gl/maplibre'
 import { MapboxOverlay } from '@deck.gl/mapbox'
+import { HeatmapLayer } from '@deck.gl/aggregation-layers'
 import { ArcLayer, ColumnLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import CameraCard from './CameraCard'
@@ -13,6 +14,10 @@ const POLICE_S = 1800 // SFPD calls stay on the map for 30 replay minutes, fadin
 const narrow = () => typeof window !== 'undefined' && window.innerWidth < 900
 const VIEW = { longitude: -122.447, latitude: 37.757, zoom: narrow() ? 11 : 11.7, pitch: 0, bearing: 0 }
 const TILT = { pitch: 55, bearing: -17 }
+// Heat ramps, faint to hot: police reports warm, injury crashes magenta so the two read apart when both are on
+const WARM = [[242, 211, 107, 0], [242, 211, 107, 120], [236, 160, 70, 170], [232, 120, 58, 200], [214, 74, 52, 220], [200, 50, 58, 235]]
+const MAGENTA = [[240, 182, 228, 0], [240, 182, 228, 110], [226, 130, 210, 160], [214, 92, 192, 195], [176, 52, 170, 220], [143, 31, 158, 235]]
+const HIT = [255, 255, 255, 1] // invisible but pickable, so a heat cell can be hovered
 const DPR = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1
 
 function Overlay(props) {
@@ -101,6 +106,7 @@ function tooltip({ layer, object }) {
   else if (id === 'cameras') text = `${object.name}\nClick for the live camera`
   else if (id === 'd-units') text = object.label
   else if (id === 'crashes') text = `${object.n} injury crashes since 2021\n${object.severe} severe or fatal`
+  else if (id === 'reports') text = `${object.n} police reports in 90 days · mostly ${object.top}\n${object.violent} violent (assault, robbery, weapons…)`
   else if (id === 'police' || id === 'd-warn') {
     const src = object.source === 'chp' ? 'CHP' : 'SFPD'
     const when = object.live ? 'live now' : object.source === 'chp' ? `live · ${object.t.slice(11, 16)}` : clock(secOfDay(object.t))
@@ -135,10 +141,22 @@ export default function CityMap({ calls, now, race, posts, neighborhoods, slowNb
       getLineWidth: (f) => (slowNbhds.has(f.properties.nhood) ? 1.6 : 0.8),
       updateTriggers: { getFillColor: [slowNbhds], getLineColor: [slowNbhds], getLineWidth: [slowNbhds] },
     }),
+    new HeatmapLayer({
+      id: 'reports-heat', data: incidents.reports, visible: show.reports, getPosition: (c) => [c.lon, c.lat],
+      // square root, so a few downtown cells with hundreds of reports don't wash out the rest of the city
+      getWeight: (c) => Math.sqrt(c.n), radiusPixels: 38, intensity: 1, threshold: 0.03, colorRange: WARM, opacity: 0.7,
+    }),
+    new HeatmapLayer({
+      id: 'crashes-heat', data: incidents.crashes, visible: show.crashes, getPosition: (h) => [h.lon, h.lat],
+      getWeight: (h) => Math.sqrt(h.n), radiusPixels: 32, intensity: 1, threshold: 0.03, colorRange: MAGENTA, opacity: 0.75,
+    }),
     new ScatterplotLayer({
-      id: 'crashes', data: show.crashes ? incidents.crashes : [], pickable: true, radiusUnits: 'meters',
-      getPosition: (h) => [h.lon, h.lat], getRadius: (h) => 45 + 14 * Math.sqrt(h.n),
-      getFillColor: (h) => rgb(C.bad, Math.min(190, 35 + h.n * 2)),
+      id: 'reports', data: show.reports ? incidents.reports : [], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 50],
+      radiusUnits: 'meters', getPosition: (c) => [c.lon, c.lat], getRadius: 75, getFillColor: HIT,
+    }),
+    new ScatterplotLayer({
+      id: 'crashes', data: show.crashes ? incidents.crashes : [], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 50],
+      radiusUnits: 'meters', getPosition: (h) => [h.lon, h.lat], getRadius: 110, getFillColor: HIT,
     }),
     new ColumnLayer({
       id: 'posts', data: posts, pickable: true, extruded: true, diskResolution: 6, radius: 38,

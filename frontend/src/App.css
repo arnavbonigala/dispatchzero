@@ -47,6 +47,8 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .legend-toggles button { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 0.7rem; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
 .legend-toggles button[aria-pressed='true'] { background: var(--raise); color: var(--ink); }
 .legend-toggles button[aria-pressed='false'] i { opacity: 0.35; }
+.legend i.heat { border-radius: 2px; width: 14px; background: linear-gradient(to right, #f2d36b, #e8873a, #c8323a); }
+.legend i.heat.crash { background: linear-gradient(to right, #f0b6e4, #d65cc0, #8f1f9e); }
 .legend i.bar { width: 5px; height: 13px; border-radius: 1px; background: linear-gradient(to top, var(--good), #d9a54a, var(--bad)); }
 
 .side {

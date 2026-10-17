@@ -14,6 +14,7 @@
 | `backend/forecast.py` | C | Poisson demand forecast per neighborhood and hour |
 | `backend/daily.py` | C | Daily loop: fetch, calibrate if needed, re-score, learn, publish |
 | `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading`; latest in `data/camera_readings.json`, history appended to `data/camera_log.jsonl` (timestamps in San Francisco time; `--clip` replays are marked `"source": "clip"` and never logged) |
+| `backend/incidents.py` | B | Incidents around SF for the map and live dispatch (see Incident layers): live SFPD calls and CHP incidents (`--loop` every 2 min), the frozen week's SFPD calls (`--history`), injury-crash hotspots (`--crashes`), SFPD incident-report heat cells (`--reports`) |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + MapLibre + deck.gl: replay map with a 3D view, learning log, call flow, live dispatch, live camera video |
 
@@ -155,6 +156,20 @@ In engine mode the objective is `weighted_mean_s` (life-threatening calls count 
 
 Current result: holdout deviance 4,135 vs 5,504 for the naive average. Rain ×1.24, heat ×1.03 per degree above 25 C.
 
+## Incident layers
+
+All public, no key. `incidents.py` writes to `data/` and copies a small fixture to `fixtures/` so the map works without the API.
+
+| Map layer | Source | Refresh | What is kept |
+|---|---|---|---|
+| SFPD calls (dots, replay) | DataSF `2zdj-bwza`, closed dispatched calls | `incidents.py --history` | Frozen-week priority A and B calls: type, priority, intersection, neighborhood. Officer-initiated and sensitive calls and all free-text notes are dropped. Shown for 30 replay minutes, fading; weapon or violence calls get a red ring, vehicle crashes are amber |
+| SFPD calls (live) | DataSF `gnap-fj3t`, real-time dispatched calls, about 15 min behind | `incidents.py` or `--loop` | Same filter, last 3 hours |
+| CHP freeway, live | CHP media feed `media.chp.ca.gov/sa_xml/sa.xml`, Golden Gate center, inside SF | `incidents.py` or `--loop` | Type, location, route, a guessed slowdown by type |
+| Police reports, 90 days (heat) | DataSF `wg3w-h783`, SFPD incident reports, about a day behind | `incidents.py --reports` | Initial reports with a location, last 90 days, counted per 150 m cell (cells with 2+), with violent count and top category. Paperwork categories (lost property, warrants, case closures) are left out. Heat is weighted by the square root of the count so downtown doesn't wash out the city; hover a cell for its numbers |
+| Injury crashes since 2021 (heat) | DataSF `ubvf-ztfx`, traffic crashes resulting in injury, about 7 weeks behind | `incidents.py --crashes` | Counted per 220 m cell (cells with 3+), with severe and fatal counts |
+
+Live dispatch returns `warnings`: frozen-week police calls within 500 m in the 45 minutes before the moment, and live CHP incidents within 1.5 km, weapon or violence calls first. The panel lists them under Nearby and the map rings them. They inform the crew only; they do not change which unit is sent.
+
 ## API
 
 | Route | Returns |
@@ -165,6 +180,10 @@ Current result: holdout deviance 4,135 vs 5,504 for the naive average. Rain ×1.
 | `GET /results/{version}?split=frozen` | Per-call results for the replay |
 | `GET /policy/{version}` | Policy source |
 | `GET /cameras` | `data/camera_readings.json`, or the fixture |
+| `GET /incidents/live` | Latest live SFPD and CHP refresh, empty when over 15 minutes old |
+| `GET /incidents/police?day=YYYY-MM-DD` | Frozen-week SFPD calls on that day, or the Tuesday fixture |
+| `GET /incidents/reports` | SFPD incident-report heat cells |
+| `GET /incidents/crashes` | Injury-crash hotspots |
 | `GET /posts`, `/slow`, `/speeds` | `data/` files |
 
 Results are cached in `runs/results/{version}_{split}.json`. Delete that folder after any change to default scoring. The Vite dev server proxies `/api` to port 8000.

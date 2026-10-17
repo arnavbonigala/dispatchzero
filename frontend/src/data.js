@@ -10,6 +10,7 @@ import cameraImages from '@fixtures/camera_images.json'
 import fxSlow from '@fixtures/slow_nbhds.json'
 import fxPolice from '@fixtures/police_tuesday.json'
 import fxCrashes from '@fixtures/crash_hotspots.json'
+import fxReports from '@fixtures/police_reports.json'
 import neighborhoods from '@fixtures/neighborhoods.geojson?raw'
 
 const SPLIT = 'frozen'
@@ -37,6 +38,7 @@ export function loadFixtures() {
     cameras: withImages(fxCameras),
     policeFixture: fxPolice,
     crashes: fxCrashes,
+    reports: fxReports,
     liveIncidents: { fetched_at: null, police: [], chp: [] },
   }
 }
@@ -56,9 +58,9 @@ function bestAgent(versions) {
 // Resolves to the fields the API could serve; the caller merges them over the fixtures.
 export async function loadLive() {
   const live = {}
-  const [posts, slow, cameras, versions, headline, crashes, incidents] = await Promise.allSettled([
+  const [posts, slow, cameras, versions, headline, crashes, incidents, reports] = await Promise.allSettled([
     api('/posts'), api('/slow'), api('/cameras'), api(`/versions?mode=${MODE}`), api(`/headline?mode=${MODE}`),
-    api('/incidents/crashes'), api('/incidents/live'),
+    api('/incidents/crashes'), api('/incidents/live'), api('/incidents/reports'),
   ])
   if (headline.status === 'fulfilled') live.headline = headline.value
   if (posts.status === 'fulfilled') live.posts = posts.value
@@ -66,6 +68,7 @@ export async function loadLive() {
   if (cameras.status === 'fulfilled') live.cameras = withImages(cameras.value)
   if (crashes.status === 'fulfilled') live.crashes = crashes.value
   if (incidents.status === 'fulfilled') live.liveIncidents = incidents.value
+  if (reports.status === 'fulfilled') live.reports = reports.value
 
   const agentVersion = versions.status === 'fulfilled' ? bestAgent(versions.value) : null
   const [baseline, agent] = await Promise.allSettled([

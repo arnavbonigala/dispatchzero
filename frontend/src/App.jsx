@@ -46,10 +46,12 @@ function usePolice(day, fixture) {
   return fixture.day === day ? fixture.police : []
 }
 
+// [key, label, swatch]; a swatch starting with 'heat' is a CSS gradient class
 const LAYERS = [
   ['police', 'SFPD calls', C.police],
   ['chp', 'CHP freeway, live', C.gold],
-  ['crashes', 'injury-crash hotspots', C.bad],
+  ['reports', 'police reports, 90 days', 'heat'],
+  ['crashes', 'injury crashes since 2021', 'heat crash'],
 ]
 
 // Frozen results span a week; the replay plays one day of it. Prefer a Tuesday (the demo script's day).
@@ -276,7 +278,7 @@ function Legend({ show, setShow }) {
       <li className="legend-toggles" role="group" aria-label="Incident layers">
         {LAYERS.map(([k, label, color]) => (
           <button key={k} aria-pressed={show[k]} onClick={() => setShow((s) => ({ ...s, [k]: !s[k] }))}>
-            <i style={{ background: color }} /> {label}
+            {color.startsWith('heat') ? <i className={color} /> : <i style={{ background: color }} />} {label}
           </button>
         ))}
       </li>
@@ -317,9 +319,9 @@ export default function App() {
   const dispatch = useDispatch(day, playback)
   const learning = useLearning(playback)
   const police = usePolice(day, data.policeFixture)
-  const [show, setShow] = useState({ police: true, chp: true, crashes: false })
-  const incidents = useMemo(() => ({ police, chp: data.liveIncidents.chp ?? [], crashes: data.crashes.hotspots ?? [] }),
-    [police, data.liveIncidents, data.crashes])
+  const [show, setShow] = useState({ police: true, chp: true, reports: true, crashes: false })
+  const incidents = useMemo(() => ({ police, chp: data.liveIncidents.chp ?? [], crashes: data.crashes.hotspots ?? [],
+    reports: data.reports.cells ?? [] }), [police, data.liveIncidents, data.crashes, data.reports])
   const [camera, setCamera] = useState(null)
   const jam = useMemo(() => {
     const r = dispatch.state.result

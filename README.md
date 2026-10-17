@@ -95,6 +95,9 @@ Emergency dispatch runs on fixed, hand-written rules. Golden Minute turns it int
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python backend/fetch.py
+.venv/bin/python backend/incidents.py --history
+.venv/bin/python backend/incidents.py --reports
+.venv/bin/python backend/incidents.py --crashes
 .venv/bin/python backend/sim.py --calibrate
 .venv/bin/python backend/sim.py --fit-speeds
 .venv/bin/python backend/sim.py --fit-eta
@@ -105,7 +108,7 @@ cd frontend && npm install && npm run dev
 .venv/bin/python backend/agent.py --engines --headline
 ```
 
-`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, paramedic-engine dispatches, weather, neighborhood data, hospital handoff times, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph. `backend/cameras.py --once` takes a live camera reading.
+`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, paramedic-engine dispatches, weather, neighborhood data, hospital handoff times, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph. `backend/cameras.py --once` takes a live camera reading. `incidents.py` adds SFPD calls, SFPD incident reports, CHP freeway incidents and injury crashes for the map (run it with `--loop` for live SFPD and CHP); see Incident layers in `ARCHITECTURE.md`.
 
 ## Architecture
 
