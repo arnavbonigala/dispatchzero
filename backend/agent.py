@@ -20,6 +20,9 @@ SIM_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
 
+GOAL = "Goal: make the 10 slowest neighborhoods faster (their median response time) without making the citywide median more than 5 s slower than baseline."
+ENGINE_GOAL = "Goal: cut the citywide average time to the first paramedic (mean_s) by more than 60 s versus baseline, while keeping the 10 slowest neighborhoods faster than baseline. Each candidate must lower the training mean_s below the current best's."
+
 MOVE_HINTS = """Big rewrites overfit the training weeks and slow the rest of the city. Prefer small, targeted changes to the current best.
 A known working idea: move about 3 spare units from the biggest downtown posts to posts in the slow neighborhoods, leaving everyone else alone.
 Moving 4 or more units looks free on training but slows everyone on busier weeks. Keep at most 3 units moved at once and at least 2 units at each downtown post. Look for gains in when units move (time buckets in post_plan) or in choose_unit, not in moving more units.
@@ -28,7 +31,7 @@ Moving 4 or more units looks free on training but slows everyone on busier weeks
 
 SYSTEM = """You improve an ambulance dispatch policy for San Francisco, tested in a simulator that replays real 911 calls.
 
-Goal: make the 10 slowest neighborhoods faster (their median response time) without making the citywide median more than 5 s slower than baseline.
+{goal}
 Your candidate must beat the current best on the training weeks, then pass the same test on a holdout week you never see.
 {hints}You control two functions in one Python file:
 
@@ -68,8 +71,6 @@ ENGINE_NOTE = """Engine mode: the score is the time until the first paramedic is
 def send_engine(call, engines, eta, ambulance_s) -> str | None
 
 `engines` lists idle paramedic fire engines as {unit_id, post, kind: "engine"}; `eta(engine, call)` is that engine's seconds from dispatch to scene; `ambulance_s` is the chosen ambulance's seconds from dispatch to scene. Return an engine id to send it, or None. Injected globals: `ENGINES` (engine to its station post) and `ENGINE_LOAD` ("E01|15": that engine's own fire and other dispatches per day in that hour). Without send_engine, an engine goes only when history sent one. A sent engine is busy for about 10 minutes on scene, so it can miss its own fire calls: `stats.engine_conflicts` counts real engine calls that start while your policy has that engine busy, and a candidate with more than twice the baseline's conflicts is rejected.
-
-Faster for everyone is the priority in engine mode: the citywide median counts as much as the slow neighborhoods, so look for gains across the whole city, not only the ten slow neighborhoods.
 
 """
 
@@ -117,7 +118,12 @@ def gates(train, best_train, holdout=None):
             base = baseline_conflicts(s["split"])
             if s["stats"]["engine_conflicts"] > 2 * base:
                 return False, f"{s['split']}: {s['stats']['engine_conflicts']} engine conflicts vs baseline {base}"
-    if train["slow_median_s"] >= best_train["slow_median_s"]:
+    if EXTRA:
+        if train["mean_s"] >= best_train["mean_s"]:
+            return False, f"train: average {train['mean_s']:.0f}s not below best {best_train['mean_s']:.0f}s"
+        if holdout is not None and holdout["mean_s"] >= baseline_summary("holdout")["mean_s"]:
+            return False, f"holdout: average {holdout['mean_s']:.0f}s not below baseline {baseline_summary('holdout')['mean_s']:.0f}s"
+    elif train["slow_median_s"] >= best_train["slow_median_s"]:
         return False, f"train: slow median {train['slow_median_s']:.0f}s not below best {best_train['slow_median_s']:.0f}s"
     if train["vs_baseline"]["everyone"]["median_diff_s"] > OVERALL_TOLERANCE_S:
         return False, f"train: citywide {train['vs_baseline']['everyone']['median_diff_s']:+.0f}s vs baseline"
@@ -127,10 +133,14 @@ def gates(train, best_train, holdout=None):
     return True, "passed train and holdout"
 
 
-def baseline_conflicts(split, cache={}):
+def baseline_summary(split, cache={}):
     if split not in cache:
-        cache[split] = sim("--policy", "baseline", "--split", split)["stats"]["engine_conflicts"]
+        cache[split] = sim("--policy", "baseline", "--split", split)
     return cache[split]
+
+
+def baseline_conflicts(split):
+    return baseline_summary(split)["stats"]["engine_conflicts"]
 
 
 def record(row):
@@ -158,8 +168,8 @@ def step(model):
     best_train = evaluate(best, "train")
     base_train = evaluate("baseline", "train")
     worst = sim("--policy", best, "--split", "train", "--worst", "50")
-    slim = lambda s: {k: s[k] for k in ("slow_median_s", "slow_n", "median_s", "p90_s", "n", "stats") if k in s}
-    recent = [{**{k: r.get(k) for k in ("version", "parent", "diagnosis", "accepted", "train_slow_median", "train_all_diff")},
+    slim = lambda s: {k: s[k] for k in ("slow_median_s", "slow_n", "median_s", "mean_s", "p90_s", "n", "stats") if k in s}
+    recent = [{**{k: r.get(k) for k in ("version", "parent", "diagnosis", "accepted", "train_slow_median", "train_all_diff", "train_mean")},
                "reason": "failed the holdout gate" if str(r.get("reason", "")).startswith("holdout") else r.get("reason")} for r in rows[-5:]]
     near = [r for r in rows if str(r.get("reason", "")).startswith("holdout") and (POLICIES / f"{r['version']}.py").exists()]
     near = min(near, key=lambda r: r["train_slow_median"], default=None)
@@ -173,15 +183,16 @@ def step(model):
     name = next_name()
     row = {"version": name, "parent": best, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
     try:
-        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS), model))
+        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS, goal=ENGINE_GOAL if EXTRA else GOAL), model))
         (POLICIES / f"{name}.py").write_text(code)
         train = evaluate(name, "train")
-        row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"]}
+        row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"], "train_mean": train["mean_s"]}
         ok, why = gates(train, best_train)
         if ok:
             holdout = evaluate(name, "holdout")
             g = holdout["vs_baseline"]
-            row |= {"holdout_slow_diff": g["slow_nbhds"]["median_diff_s"], "holdout_slow_ci": g["slow_nbhds"]["ci95"], "holdout_all_diff": g["everyone"]["median_diff_s"]}
+            row |= {"holdout_slow_diff": g["slow_nbhds"]["median_diff_s"], "holdout_slow_ci": g["slow_nbhds"]["ci95"], "holdout_all_diff": g["everyone"]["median_diff_s"],
+                    "holdout_mean_diff": round(holdout["mean_s"] - baseline_summary("holdout")["mean_s"], 1)}
             ok, why = gates(train, best_train, holdout)
         if ok:
             row["frozen_median"] = sim("--policy", name, "--split", "frozen")["median_s"]
@@ -199,7 +210,7 @@ def rescore():
         train = evaluate(r["version"], "train")
         holdout = evaluate(r["version"], "holdout")
         g = holdout["vs_baseline"]
-        r |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"],
+        r |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"], "train_mean": train["mean_s"],
               "holdout_slow_diff": g["slow_nbhds"]["median_diff_s"], "holdout_slow_ci": g["slow_nbhds"]["ci95"], "holdout_all_diff": g["everyone"]["median_diff_s"],
               "holdout_passes": g["passes"] or r["version"] == "baseline"}
         if r["accepted"]:
