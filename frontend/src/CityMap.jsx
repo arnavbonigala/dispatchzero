@@ -102,7 +102,7 @@ function tooltip({ layer, object }) {
   return text && { text, style }
 }
 
-export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, cameras, armed, onPick, result, elapsed, camera, onCamera, jam }) {
+export default function CityMap({ calls, now, race, posts, neighborhoods, slowNbhds, cameras, armed, onPick, result, elapsed, camera, onCamera, jam }) {
   const mapRef = useRef(null)
   const [flat, setFlat] = useState(true)
   const wave = 0.5 + 0.5 * Math.sin(elapsed / 8)
@@ -138,15 +138,15 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
     }),
     new ScatterplotLayer({
       id: 'calls-ring', data: active, stroked: true, filled: true, radiusUnits: 'meters', lineWidthUnits: 'pixels',
-      getPosition: (c) => [c.lon, c.lat], getRadius: 160,
+      getPosition: (c) => [c.lon, c.lat], getRadius: race ? 90 : 160,
       getFillColor: rgb(C.bad, 40), getLineColor: rgb(C.bad, 220), getLineWidth: 1.5,
     }),
     new ColumnLayer({
-      id: 'calls-beacon', data: active, extruded: true, radius: 14, diskResolution: 8,
+      id: 'calls-beacon', data: race ? [] : active, extruded: true, radius: 14, diskResolution: 8,
       getPosition: (c) => [c.lon, c.lat], getElevation: 520, getFillColor: rgb(C.bad, 170),
     }),
     new ArcLayer({
-      id: 'units-arc', data: moving, getSourcePosition: (m) => m.src, getTargetPosition: (m) => m.dst,
+      id: 'units-arc', data: race ? [] : moving, getSourcePosition: (m) => m.src, getTargetPosition: (m) => m.dst,
       getSourceColor: (m) => rgb(m.color, 30), getTargetColor: (m) => rgb(m.color, 200), getWidth: 2, getHeight: 0.35, greatCircle: false,
     }),
     new PathLayer({

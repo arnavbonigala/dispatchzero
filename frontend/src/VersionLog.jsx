@@ -6,8 +6,9 @@ import './VersionLog.css'
 const W = 360
 const H = 110
 const PAD = { l: 40, r: 8, t: 10, b: 10 }
-const PLAY_MS = 350
-const KEPT_MS = 2900
+const STEP_MS = 70
+const RACE_MS = 2000
+const BIG_GAIN_S = 20
 
 const metric = (v) => v.train_mean ?? v.train_slow_median
 const parse = (text) => text.trim().split('\n').map((l) => JSON.parse(l))
@@ -93,6 +94,7 @@ export default function VersionLog({ onLearn }) {
   const [playing, setPlaying] = useState(false)
   const latestKept = pts.findLastIndex((p) => p.accepted)
   const at = Math.min(sel ?? latestKept, pts.length - 1)
+  const races = useMemo(() => new Set(pts.flatMap((p, i) => (i === 0 || i === latestKept || p.gain <= -BIG_GAIN_S ? [i] : []))), [pts, latestKept])
 
   useEffect(() => {
     fetch('/api/lessons?mode=engines')
@@ -107,16 +109,13 @@ export default function VersionLog({ onLearn }) {
 
   useEffect(() => {
     if (!playing) return
-    if (at >= pts.length - 1) {
-      setPlaying(false)
-      return
-    }
-    const id = setTimeout(() => setSel(at + 1), pts[at].bestV === pts[at - 1]?.bestV ? PLAY_MS : KEPT_MS)
+    const id = setTimeout(() => (at >= latestKept ? setPlaying(false) : setSel(at + 1)), races.has(at) ? RACE_MS : STEP_MS)
     return () => clearTimeout(id)
-  }, [playing, at, pts])
+  }, [playing, at, latestKept, races])
 
-  const learnV = playing ? pts[at]?.bestV : null
-  const learnN = playing ? pts[at]?.n : null
+  const raceAt = playing ? pts.findLastIndex((p, i) => i <= at && races.has(i)) : -1
+  const learnV = raceAt >= 0 ? pts[raceAt].bestV : null
+  const learnN = raceAt >= 0 ? pts[raceAt].n : null
   useEffect(() => {
     onLearn?.(learnV && { version: learnV, n: learnN })
   }, [learnV, learnN, onLearn])

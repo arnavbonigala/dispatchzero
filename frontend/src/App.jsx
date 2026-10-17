@@ -125,8 +125,8 @@ const gain = (diff) => mmss(Math.abs(diff))
 
 const LEARNING = Object.values(import.meta.glob('../../fixtures/engines_learning.json', { import: 'default', eager: true }))[0]
 const LEARN_HOLD_MS = 2500
-const RACE_S = 1200
-const RACE_MS = 2400
+const RACE_S = 900
+const RACE_MS = 1600
 
 function useLearning(playback) {
   const [step, setStep] = useState(null)
@@ -165,7 +165,7 @@ function LearnChip({ step, calls, now }) {
   const fast = calls.filter((c) => c.response_s <= 8 * 60 && c.response_s <= now).length
   return (
     <p className="learn-chip glass" role="status">
-      {step.n === 0 ? 'Before learning' : `After step ${step.n}`} · all {calls.length} calls from {dayLabel(LEARNING.day)} at once · <b className="learn-clock">{mmss(now)}</b> in · <b>{fast}</b> reached within 8 min
+      {step.n === 0 ? 'Before learning' : `After step ${step.n}`} · <b className="learn-clock">{mmss(now)}</b> · <b>{fast}</b> of {calls.length} calls reached in 8 min
     </p>
   )
 }
@@ -305,7 +305,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="stage">
-        <CityMap calls={learning.calls ?? (dispatching ? [] : calls)} now={learning.calls ? learning.now : playback.now} cameras={data.cameras} posts={data.posts}
+        <CityMap calls={learning.calls ?? (dispatching ? [] : calls)} now={learning.calls ? learning.now : playback.now} race={!!learning.calls} cameras={data.cameras} posts={data.posts}
           neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}
           onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
           camera={camera} onCamera={setCamera} jam={jam} />
