@@ -28,6 +28,7 @@ MIN_ON_SCENE_S = 300
 FALLBACK_MPS = 8.0
 DETOUR = 1.3
 FREEWAY = {"motorway", "motorway_link"}
+CAMERA_RADIUS_M = 600
 PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
 ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
 BANNED_NAMES = {"open", "eval", "exec", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "__import__", "input", "breakpoint", "memoryview", "type", "object", "super"}
@@ -70,7 +71,8 @@ class Roads:
         nodes = list(g.nodes)
         idx = {n: i for i, n in enumerate(nodes)}
         self.n = len(nodes)
-        self.node_xy = xy([g.nodes[n]["y"] for n in nodes], [g.nodes[n]["x"] for n in nodes])
+        self.node_ll = np.array([[g.nodes[n]["y"], g.nodes[n]["x"]] for n in nodes])
+        self.node_xy = xy(self.node_ll[:, 0], self.node_ll[:, 1])
         best = {}
         street = np.zeros(self.n, bool)
         for u, v, d in g.edges(data=True):
@@ -105,6 +107,13 @@ class Roads:
         u, v = (self.edge_v, self.edge_u) if reverse else (self.edge_u, self.edge_v)
         return csr_matrix((w, (u, v)), shape=(self.n, self.n))
 
+    def path(self, src, dst, slowdowns=None):
+        dist, pred = dijkstra(self._matrix(slowdowns), directed=True, indices=int(src), return_predecessors=True)
+        out = [int(dst)]
+        while out[-1] != src and pred[out[-1]] >= 0:
+            out.append(int(pred[out[-1]]))
+        return float(dist[dst]), [[round(a, 6), round(b, 6)] for a, b in self.node_ll[out[::-1]]]
+
     def times(self, sources, slowdowns=None, reverse=False):
         key = (tuple(int(s) for s in sources), tuple(sorted((slowdowns or {}).items())), reverse)
         if key not in self._cache:
@@ -114,6 +123,22 @@ class Roads:
             out.setflags(write=False)
             self._cache[key] = out
         return self._cache[key]
+
+
+def edge_slowdowns(readings, roads):
+    mid = (roads.node_xy[roads.edge_u] + roads.node_xy[roads.edge_v]) / 2
+    refs = [set(str(r or "").replace(";", ",").split(",")) for r in roads.edge_ref]
+    out = {}
+    for r in readings:
+        f = float(r.get("slowdown", 1.0))
+        if f <= 1.0:
+            continue
+        route = r.get("route", "").replace("-", " ").replace("SR ", "CA ")
+        near = np.linalg.norm(mid - xy([r["lat"]], [r["lon"]]), axis=1) <= CAMERA_RADIUS_M
+        for e in np.flatnonzero(near):
+            if not route or route in refs[e]:
+                out[int(e)] = max(out.get(int(e), 1.0), f)
+    return out
 
 
 def shift_windows(dispatches):
@@ -616,7 +641,43 @@ def self_check():
     far = roads.nearest([37.7599], [-122.4148])[0]
     assert np.isclose(slow[0, far], 3 * plain[0, far]) and 120 < plain[0, far] < 900, plain[0, far]
     assert not plain.flags.writeable
+    d, line = roads.path(src[0], far)
+    assert np.isclose(d, plain[0, far]) and len(line) > 2 and np.allclose(line[0], roads.node_ll[src[0]], atol=1e-5), (d, line[:2])
+    cams = json.loads((DATA / "cameras.json").read_text())
+    tv = next(c for c in cams if c["route"] == "US-101")
+    slow = edge_slowdowns([{**tv, "slowdown": 4.0}], roads)
+    assert slow and all(v == 4.0 for v in slow.values()) and all("US 101" in str(roads.edge_ref[e]) for e in slow), len(slow)
+    assert edge_slowdowns([{**tv, "slowdown": 1.0}], roads) == {}
     print("self-check ok")
+
+
+def jam_test(world, camera_id, factor=4.0, split="holdout"):
+    cams = {c["camera_id"]: c for c in json.loads((DATA / "cameras.json").read_text())}
+    cam = cams[camera_id]
+    slow = edge_slowdowns([{**cam, "slowdown": factor}], world.roads)
+    jammed = World.load(roads=world.roads, slowdowns=slow)
+    posts = sorted(set(world.homes.values()))
+    rows = []
+    for c in load_calls(split):
+        node = world.call_nodes[c["call_id"]]
+        plain = {p: world.drive(p, node, c["hour"], c["nbhd"]) for p in posts}
+        jam = {p: jammed.drive(p, node, c["hour"], c["nbhd"]) for p in posts}
+        blind = min(posts, key=plain.get)
+        aware = min(posts, key=jam.get)
+        if jam[blind] > plain[blind] + 1:
+            rows.append({"t": c["t"], "nbhd": c["nbhd"], "blind_post": blind, "blind_eta_s": round(jam[blind], 1), "aware_post": aware, "aware_eta_s": round(jam[aware], 1), "saved_s": round(jam[blind] - jam[aware], 1), "jam_cost_s": round(jam[blind] - plain[blind], 1)})
+    switched = [r for r in rows if r["aware_post"] != r["blind_post"]]
+    return {
+        "camera": cam["name"],
+        "slowdown": factor,
+        "edges_slowed": len(slow),
+        "split": split,
+        "calls_whose_best_route_crosses_the_jam": len(rows),
+        "calls_sent_from_a_different_post": len(switched),
+        "median_jam_cost_s": round(statistics.median(r["jam_cost_s"] for r in rows), 1) if rows else 0.0,
+        "median_saved_by_switching_s": round(statistics.median(r["saved_s"] for r in switched), 1) if switched else 0.0,
+        "examples": sorted(switched, key=lambda r: -r["saved_s"])[:5],
+    }
 
 
 def write_fixtures(world):
@@ -639,6 +700,8 @@ def main():
     ap.add_argument("--fixtures", action="store_true")
     ap.add_argument("--worst", type=int, metavar="N")
     ap.add_argument("--fit-speeds", action="store_true")
+    ap.add_argument("--jam-test", metavar="CAMERA_ID")
+    ap.add_argument("--slowdown", type=float, default=4.0)
     a = ap.parse_args()
     if a.self_check:
         return self_check()
@@ -649,6 +712,9 @@ def main():
         return
     if a.fixtures:
         return write_fixtures(world)
+    if a.jam_test:
+        print(json.dumps(jam_test(world, a.jam_test, a.slowdown, a.split if a.split != "train" else "holdout"), indent=1))
+        return
     if a.fit_speeds:
         adopted, report = fit_speeds(world)
         print(json.dumps(report, indent=1))
