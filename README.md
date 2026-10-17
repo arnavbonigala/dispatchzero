@@ -9,6 +9,7 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python backend/fetch.py
 .venv/bin/python backend/sim.py --calibrate
+.venv/bin/python backend/sim.py --fit-speeds
 .venv/bin/python backend/sim.py --self-check
 cd frontend && npm install && npm run dev
 ```
@@ -21,7 +22,7 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | `backend/contracts.py` | All | Frozen shapes: `Call`, `IdleUnit`, `CallResult`, `Summary`, `Version`, `CameraReading`, policy signatures |
 | `backend/fetch.py` | A | Data download |
-| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--self-check`, `--fixtures` |
+| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
 | `backend/agent.py` | C | Improvement loop |
 | `backend/api.py` | C | FastAPI |
@@ -55,6 +56,16 @@ Rules the simulator enforces:
 
 ## Calibration
 
-OSM speed-limit travel times are scaled by one factor per time-of-day bucket so the baseline policy's simulated median drive time matches SF's actual median on the training weeks. Fit on weeks 1 to 4: baseline sim median 681s vs actual 663s (+2.8%); frozen week 696s vs 658s (+5.8%). Factors are about 1.8 to 2.4.
+OSM speed-limit travel times are scaled by one factor per time-of-day bucket so the baseline policy's simulated median drive time matches SF's actual median on the training weeks. Fit on weeks 1 to 4 with learned road speeds: baseline sim median 679s vs actual 663s (+2.4%); frozen week 679s vs 658s (+3.2%). Bucket factors are about 1.7 to 2.1.
 
-Limits to state honestly: SF publishes no unit locations, so the simulator assumes idle units wait at posts. Per-call simulated drive time correlates only weakly with real drive time (Spearman 0.16, median absolute error about 320s), and the factors also absorb units not being at their post. Present gains as simulator-relative estimates calibrated to SF's real medians, not as predicted real-world seconds.
+## Learned road speeds
+
+`--fit-speeds` learns one multiplier per (destination neighborhood × time bucket), about 200 cells, from each training call's real drive time against the route time from the dispatched unit's home post. Cells with few calls are shrunk toward 1 (weight 30 calls). The multipliers are adopted only if they lower the median drive-time error on the holdout week, then calibration is re-run. Current result: holdout error 287s → 244s (adopted). Fastest: Sunset/Parkside (~0.67×); slowest: Tenderloin and South of Market (2.5 to 3.7×, which also reflects units rarely being at their post downtown).
+
+`data/speeds.json` holds `adopted`, the error `report`, `rel` (`"Neighborhood|bucket": multiplier`), and `nbhd_centers` (`"Neighborhood": [lat, lon]`) for the UI heatmap.
+
+## Agent context
+
+`sim.py --policy NAME --split train --worst 50 --out FILE` returns the 50 calls with the most controllable time (queue wait + drive), each with the closest post, its drive time, which units were based there and whether they were idle, busy or off duty, plus `avoidable_s`, and aggregates: worst calls by neighborhood and bucket, and the top (neighborhood, bucket) cells by total avoidable seconds.
+
+Limits to state honestly: SF publishes no unit locations, so the simulator assumes idle units wait at posts. Per-call simulated drive time correlates only weakly with real drive time (Spearman 0.19, median absolute error about 245s), and the factors also absorb units not being at their post. Present gains as simulator-relative estimates calibrated to SF's real medians, not as predicted real-world seconds.

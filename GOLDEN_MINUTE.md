@@ -82,8 +82,8 @@ def choose_unit(call: dict, idle: list[dict], eta) -> str              # eta(uni
 - Why: the fastest route is already exact once road speeds are known, so better routes come from better speeds. Speed limits times one citywide factor misses patterns like "the Mission at 5pm is 40% slower than posted."
 - Signal: actual drive time = `on_scene_dttm − response_dttm` for each training call. Predicted drive time = the route time from the unit's usual post to the scene. SF publishes no GPS tracks, so speeds are learned per area, not per street.
 - Model: one speed factor per (neighborhood × hour bucket). Hour buckets: night, morning rush, midday, evening rush, evening. Factor = median of actual ÷ predicted over that cell's calls, shrunk toward the citywide factor when the cell has fewer than 30 calls.
-- Applied to: every edge whose midpoint falls in that neighborhood, alongside the camera slowdown (`edge time × area factor × camera slowdown`).
-- Adopt only if it helps: compare the median absolute error of predicted vs actual drive time on the frozen week. Keep the learned factors only if the error drops, and report both numbers on screen.
+- Applied to: drives into that neighborhood (`route time × bucket factor × neighborhood multiplier`), with camera slowdowns on the route edges.
+- Adopt only if it helps: fit on weeks 1 to 3, compare the median absolute error of predicted vs actual drive time on the holdout week, keep the factors only if the error drops, and report both numbers on screen.
 - UI: a heatmap layer (neighborhood colored by its factor at the selected hour) next to the camera markers.
 
 **Agent (`agent.py`)**
@@ -149,8 +149,8 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] `sim.py --self-check` passing
 - [x] Simulator hardened against cheating policies (source check, opaque call ids, validated choices, relocation and return-drive costs)
 - [x] Holdout week split; paired bootstrap CI via `--compare`
-- [ ] Worst-50 calls with context for the agent
-- [ ] Stretch: learned road speeds, kept only if frozen-week error drops
+- [x] Worst-50 calls with context for the agent (`sim.py --worst 50`)
+- [x] Stretch: learned road speeds, gated on the holdout week: error 287s → 244s, adopted
 - [ ] `edge_slowdowns()` wired into the simulator
 - [ ] With/without-jam test
 - [ ] README
