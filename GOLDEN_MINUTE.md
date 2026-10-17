@@ -173,18 +173,18 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [ ] Backup video
 
 ### C: agent and API
-- [ ] `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`
-- [ ] FastAPI serving fixture JSON
-- [ ] Swap the stub for the real `sim.py`
-- [ ] First 3 real iterations, prompt tuned
-- [ ] At least one version passes the slow-neighborhood goal on the holdout week
+- [x] `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`
+- [x] FastAPI serving fixture JSON
+- [x] Swap the stub for the real `sim.py`
+- [x] First 3 real iterations, prompt tuned
+- [x] At least one version passes the slow-neighborhood goal on the holdout week
 - [ ] 6 to 10 iterations run, final version frozen
 - [ ] Version chart and diagnosis feed in the UI
 - [ ] Pitch with real numbers
 
 ### Checkpoints
 - [x] 1:30 go/no-go: calibration within 10%
-- [ ] 2:45: an accepted version passes the goal on the holdout week
+- [x] 2:45: an accepted version passes the goal on the holdout week
 - [ ] 3:45: full loop visible in the UI
 - [ ] 4:30: demo runs 3 times cleanly
 - [ ] 5:00: submitted
