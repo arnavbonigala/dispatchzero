@@ -50,7 +50,7 @@ Injected globals:
 
 Rules the simulator enforces:
 - Policies only see dispatcher-visible call fields: an opaque per-run `call_id`, `t`, `lat`, `lon`, `hour`, `nbhd`, `station_area`, `priority`.
-- Source is checked before loading: imports limited to `math`, `statistics`, `collections`, `itertools`, `functools`, `heapq`, `bisect`, `random`; no file access, `eval`/`exec`, `getattr`, or underscore attributes. Violations raise `PolicyRejected`.
+- Source is checked before loading: imports limited to `math`, `statistics`, `collections`, `itertools`, `functools`, `heapq`, `bisect`, `random`, and a module may only be used as `module.function` (no submodules such as `statistics.sys`, no passing modules around); no file access, `eval`/`exec`, `getattr`, underscore attributes, or frame attributes like `gi_frame`. Violations raise `PolicyRejected`.
 - `choose_unit` must return an idle unit's id. Anything else, or an exception, falls back to the closest idle unit and is counted in `stats`.
 - Moving a unit to a new post takes its drive time between posts, starting at the hour boundary. It stays available while moving and is dispatched from its old post until it arrives.
 - After each call the unit drives back to its post before it is available again.
@@ -110,20 +110,27 @@ cd backend
 ../.venv/bin/python agent.py --final        # once, at the end: frozen week vs baseline
 ```
 
-Each iteration evaluates the current best on the training weeks, then sends Claude (`claude-sonnet-5-5`) the policy code, the training summary, the worst 50 calls from `sim.worst_calls`, per-hour and per-area tables, per-area demand, units on shift by hour, `POSTS`, `HOME` and the last 5 diagnoses. Claude replies with a `<diagnosis>` and a full policy file. The candidate is source-checked, saved as `backend/policies/vNNN.py` and run in a subprocess with a 10 minute timeout. It is promoted only if it beats the current best's median on the training weeks (gate 1) and then on the holdout week (gate 2), and it is rejected if more than 2% of its calls hit a policy error. The agent sees holdout results only as pass or fail and never sees the frozen week.
+Each iteration re-runs the current best and the baseline on the training and holdout weeks in a subprocess, so gates always compare like with like even after recalibration. It sends Claude (`claude-sonnet-5-5`) the goal (the slow neighborhoods from `slow_nbhds.json`), the policy code, the training summary next to the baseline, the worst 50 calls from `sim.worst_calls`, per-neighborhood, per-hour and per-area tables, per-area demand, units on shift by hour, `POSTS`, `HOME` and the last 5 diagnoses. Claude replies with a `<diagnosis>` and a full policy file. The candidate is source-checked, saved as `backend/policies/vNNN.py` and run in a subprocess with a 10 minute timeout, no credentials in its environment, and `random` seeded so runs are repeatable.
+
+Promotion:
+- Rejected if `post_plan` raises for any hour or `choose_unit` fails on more than 2% of calls.
+- Gate 1 (training weeks): slow-neighborhood median at least 2 s below the current best's, and citywide median at most 5 s above the baseline's.
+- Gate 2 (holdout week): slow-neighborhood median below the current best's, and `sim.goal` vs baseline `passes` (slow-neighborhood 95% CI below zero, citywide at most 5 s slower).
+
+The agent sees holdout results only as pass or fail and never sees the frozen week.
 
 `--backend api` (the default when `ANTHROPIC_API_KEY` is set) uses the Anthropic SDK. `--backend cli` uses a logged-in `claude` CLI in print mode with no tools. `--backend stub` returns canned policies, for testing the loop without spending tokens. Prompts and replies are saved under `backend/runs/llm/`.
 
-`--final` runs the best accepted version and the baseline on the frozen week (`sim.py --compare baseline`), fills `frozen_median` for those two rows of `versions.jsonl` and writes `backend/runs/headline.json`.
+`--final` runs the best accepted version and the baseline on the frozen week (`sim.py --compare baseline`), fills `frozen_median` and `frozen_slow_median` for those two rows of `versions.jsonl` and writes `backend/runs/headline.json`. It refuses to run again once `headline.json` exists unless given `--force`, and records `forced` in the headline.
 
 ## API
 
 | Route | Returns |
 |---|---|
-| `GET /versions` | `{source, versions}` from `runs/versions.jsonl`, else `fixtures/versions.jsonl`. Rows add `holdout_median`, `reason`, `stats` and `ts` to the `Version` contract |
+| `GET /versions` | `{source, versions}` from `runs/versions.jsonl`, else `fixtures/versions.jsonl`. Rows add `holdout_median`, `train_slow_median`, `holdout_slow_median`, `frozen_slow_median`, `holdout_passes`, `reason`, `stats` and `ts` to the `Version` contract |
 | `GET /headline` | Frozen-week result from `runs/headline.json`: baseline and agent medians, paired CI, calibration error |
 | `GET /runs` | Frozen-week summaries written by `--final` |
-| `GET /replay/{version}?split=frozen&day=YYYY-MM-DD` | `CallResult` rows sorted by time, plus the list of `days`. Computed with the simulator and cached in `runs/`; falls back to `fixtures/results.json` for the baseline |
+| `GET /replay/{version}?split=frozen&day=YYYY-MM-DD` | `CallResult` rows sorted by time, plus the list of `days`, for the baseline and accepted versions only. The frozen week comes only from `--final` runs (fixtures for the baseline before that); train and holdout replays run `sim.py` in a subprocess with a timeout and are cached in `runs/` |
 | `GET /posts` | Ambulance posts |
 | `GET /cameras` | `CameraReading` list from `runs/cameras.json` (where `cameras.py` should write), else fixtures |
 | `WS /live` | Pushes `{type: "versions" \| "cameras", ...}` whenever either file changes |

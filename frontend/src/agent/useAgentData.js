@@ -9,30 +9,27 @@ export function useAgentData() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    let ws
     let closed = false
-    const refreshHeadline = () => getJSON('/headline').then(setHeadline).catch(() => {})
+    const refreshHeadline = () => getJSON('/headline').then((h) => !closed && setHeadline(h)).catch(() => {})
     getJSON('/versions')
       .then((d) => {
+        if (closed) return
         setVersions(d.versions)
         setSource(d.source)
         setError(null)
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => !closed && setError(e.message))
     refreshHeadline()
-    try {
-      ws = liveSocket((msg) => {
-        if (closed || msg.type !== 'versions') return
-        setVersions(msg.versions)
-        setSource(msg.source)
-        refreshHeadline()
-      })
-    } catch {
-      // the REST snapshot above still renders without live updates
-    }
+    const live = liveSocket((msg) => {
+      if (closed || msg.type !== 'versions') return
+      setVersions(msg.versions)
+      setSource(msg.source)
+      setError(null)
+      refreshHeadline()
+    })
     return () => {
       closed = true
-      ws?.close()
+      live.close()
     }
   }, [])
 

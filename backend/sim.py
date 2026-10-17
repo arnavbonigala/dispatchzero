@@ -1,10 +1,12 @@
 import argparse
 import ast
 import bisect
+import importlib
 import importlib.util
 import json
 import random
 import statistics
+import types
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +36,7 @@ SLOW_MIN_CALLS = 50
 OVERALL_TOLERANCE_S = 5.0
 PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
 ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
+BANNED_ATTRS = {"gi_frame", "gi_code", "gi_yieldfrom", "cr_frame", "cr_code", "cr_await", "ag_frame", "ag_code", "f_globals", "f_locals", "f_builtins", "f_back", "f_code", "tb_frame", "tb_next", "co_consts", "mro"}
 BANNED_NAMES = {"open", "eval", "exec", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "__import__", "input", "breakpoint", "memoryview", "type", "object", "super"}
 
 
@@ -50,16 +53,39 @@ def xy(lat, lon):
     return np.column_stack([lon * 111320 * np.cos(np.radians(37.77)), lat * 110540])
 
 
+def _module_exports(name):
+    mod = importlib.import_module(name)
+    return {n for n in dir(mod) if not n.startswith("_") and not isinstance(getattr(mod, n), types.ModuleType)}
+
+
+MODULE_EXPORTS = {m: _module_exports(m) for m in ALLOWED_IMPORTS}
+
+
 def check_source(src):
-    for node in ast.walk(ast.parse(src)):
+    tree = ast.parse(src)
+    modules = {}
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            bad = [a.name for a in node.names if a.name.split(".")[0] not in ALLOWED_IMPORTS]
+            for a in node.names:
+                modules[a.asname or a.name.split(".")[0]] = a.name.split(".")[0]
+    parent = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            bad = [a.name for a in node.names if a.name not in ALLOWED_IMPORTS]
         elif isinstance(node, ast.ImportFrom):
-            bad = [node.module] if (node.module or "").split(".")[0] not in ALLOWED_IMPORTS else []
+            if node.module not in ALLOWED_IMPORTS or node.level:
+                bad = [node.module or "."]
+            else:
+                bad = [a.name for a in node.names if a.name not in MODULE_EXPORTS[node.module]]
         elif isinstance(node, ast.Attribute):
-            bad = [node.attr] if node.attr.startswith("_") else []
+            bad = [node.attr] if node.attr.startswith("_") or node.attr in BANNED_ATTRS else []
         elif isinstance(node, ast.Name):
             bad = [node.id] if node.id in BANNED_NAMES or node.id.startswith("__") else []
+            if not bad and node.id in modules:
+                # an imported module may only be used as module.function, never passed around or rebound
+                up = parent.get(node)
+                ok = isinstance(up, ast.Attribute) and up.value is node and up.attr in MODULE_EXPORTS[modules[node.id]]
+                bad = [] if ok or isinstance(up, ast.alias) else [node.id]
         else:
             bad = []
         if bad:
@@ -648,7 +674,8 @@ def self_check():
 
     simulate(world_(), calls, Peek)
 
-    for src in ["import os", "import sys", "from pathlib import Path", "x = eta.__self__", "f = open('x')", "import sim", "g = getattr(eta, 'a')"]:
+    for src in ["from statistics import sys", "import statistics\nx = statistics.sys", "import statistics as s\nt = s\nt.sys", "import collections.abc",
+                "g = (x for x in [1])\nf = g.gi_frame.f_globals", "from . import sim", "import os", "import sys", "from pathlib import Path", "x = eta.__self__", "f = open('x')", "import sim", "g = getattr(eta, 'a')"]:
         try:
             check_source(src)
             raise AssertionError(f"not rejected: {src}")
@@ -787,7 +814,7 @@ def main():
     if a.compare:
         summary["vs_" + Path(a.compare).stem] = goal(results, simulate(world, calls, a.compare)[0])
     if a.out:
-        Path(a.out).write_text(json.dumps({"summary": summary, "results": results}))
+        Path(a.out).write_text(json.dumps({"summary": summary, "results": results}, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
     print(json.dumps(summary, indent=1))
 
 

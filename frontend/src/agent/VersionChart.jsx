@@ -1,13 +1,14 @@
-import { fmtTime } from './api'
+import { fmtTime, goalMedian } from './api'
 
 const W = 640
 const H = 260
 const PAD = { l: 52, r: 16, t: 16, b: 44 }
 
-// Train and holdout medians per version; rejected candidates greyed out, frozen-week results as diamonds.
-export default function VersionChart({ versions }) {
-  if (!versions.length) return <p className="gm-muted">No versions yet.</p>
-  const vals = versions.flatMap((v) => [v.train_median, v.holdout_median, v.frozen_median]).filter((x) => x != null)
+// Slow-neighborhood medians (train and holdout) per version; rejected candidates greyed out, frozen-week results as diamonds.
+export default function VersionChart({ versions: rows }) {
+  if (!rows.length) return <p className="gm-muted">No versions yet.</p>
+  const versions = rows.map((v) => ({ ...v, train: goalMedian(v, 'train'), holdout: goalMedian(v, 'holdout'), frozen: goalMedian(v, 'frozen') }))
+  const vals = versions.flatMap((v) => [v.train, v.holdout, v.frozen]).filter((x) => x != null)
   if (!vals.length) return <p className="gm-muted">No scored versions yet.</p>
   const lo = Math.min(...vals)
   const hi = Math.max(...vals)
@@ -17,14 +18,14 @@ export default function VersionChart({ versions }) {
   const n = versions.length
   const x = (i) => PAD.l + (n === 1 ? (W - PAD.l - PAD.r) / 2 : (i * (W - PAD.l - PAD.r)) / (n - 1))
   const y = (s) => PAD.t + ((y1 - s) * (H - PAD.t - PAD.b)) / (y1 - y0)
-  const accepted = versions.map((v, i) => ({ v, i })).filter(({ v }) => v.accepted && v.train_median != null)
+  const accepted = versions.map((v, i) => ({ v, i })).filter(({ v }) => v.accepted && v.train != null)
   const line = (key) => accepted.filter(({ v }) => v[key] != null).map(({ v, i }) => `${x(i)},${y(v[key])}`).join(' ')
   const ticks = Array.from({ length: 5 }, (_, k) => y0 + ((k + 0.5) * (y1 - y0)) / 5)
   const every = Math.ceil(n / 12)
 
   return (
     <figure className="gm-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Median response time per policy version">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Slow-neighborhood median response time per policy version">
         {ticks.map((t) => (
           <g key={t}>
             <line x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} className="gm-grid" />
@@ -40,23 +41,23 @@ export default function VersionChart({ versions }) {
             </text>
           ) : null,
         )}
-        <polyline points={line('train_median')} className="gm-line-train" />
-        <polyline points={line('holdout_median')} className="gm-line-holdout" />
+        <polyline points={line('train')} className="gm-line-train" />
+        <polyline points={line('holdout')} className="gm-line-holdout" />
         {versions.map((v, i) => (
           <g key={v.version}>
-            {v.train_median != null && (
-              <circle cx={x(i)} cy={y(v.train_median)} r={v.accepted ? 5 : 4} className={v.accepted ? 'gm-pt-train' : 'gm-pt-rejected'}>
-                <title>{`${v.version} train ${fmtTime(v.train_median)}${v.accepted ? '' : ` (rejected: ${v.reason})`}`}</title>
+            {v.train != null && (
+              <circle cx={x(i)} cy={y(v.train)} r={v.accepted ? 5 : 4} className={v.accepted ? 'gm-pt-train' : 'gm-pt-rejected'}>
+                <title>{`${v.version} train ${fmtTime(v.train)}${v.accepted ? '' : ` (rejected: ${v.reason})`}`}</title>
               </circle>
             )}
-            {v.accepted && v.holdout_median != null && (
-              <circle cx={x(i)} cy={y(v.holdout_median)} r={4} className="gm-pt-holdout">
-                <title>{`${v.version} holdout ${fmtTime(v.holdout_median)}`}</title>
+            {v.accepted && v.holdout != null && (
+              <circle cx={x(i)} cy={y(v.holdout)} r={4} className="gm-pt-holdout">
+                <title>{`${v.version} holdout ${fmtTime(v.holdout)}`}</title>
               </circle>
             )}
-            {v.frozen_median != null && (
-              <rect x={x(i) - 5} y={y(v.frozen_median) - 5} width={10} height={10} transform={`rotate(45 ${x(i)} ${y(v.frozen_median)})`} className="gm-pt-frozen">
-                <title>{`${v.version} frozen week ${fmtTime(v.frozen_median)}`}</title>
+            {v.frozen != null && (
+              <rect x={x(i) - 5} y={y(v.frozen) - 5} width={10} height={10} transform={`rotate(45 ${x(i)} ${y(v.frozen)})`} className="gm-pt-frozen">
+                <title>{`${v.version} frozen week ${fmtTime(v.frozen)}`}</title>
               </rect>
             )}
           </g>

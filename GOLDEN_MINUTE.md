@@ -189,7 +189,7 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 ## Demo script (3 minutes)
 
 1. **Hook (20s):** "In a cardiac arrest, every minute without care cuts survival by about 10%. In SF, where you live decides how long you wait: the slowest neighborhoods wait about 3.5 minutes longer than downtown."
-2. **The loop (60s):** show the version chart. Read one diagnosis aloud, for example "Bayview had no idle unit at 6pm weekdays; repositioning M509." Show the improvement and the rejected candidates that failed the frozen-week gate.
+2. **The loop (60s):** show the version chart. Read one diagnosis aloud, for example "Bayview had no idle unit at 6pm weekdays; repositioning M509." Show the improvement and the rejected candidates that failed the unseen holdout-week gate.
 3. **The result (40s):** split-screen replay of a frozen-week Tuesday, slow neighborhoods highlighted, with their median under each side plus the citywide median. State the headline number and the calibration error.
 4. **Live cameras (40s):** Caltrans feed of a 101 jam (live or a clip recorded at rush hour). The segment turns red. A new call reroutes, and the reason appears on screen.
 5. **Close (20s):** what's next: real road speeds, fire engines, integration with dispatch centers.
