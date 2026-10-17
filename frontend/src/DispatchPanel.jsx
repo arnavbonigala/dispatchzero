@@ -25,7 +25,7 @@ const TRAFFIC = {
   osm: 'learned road speeds (no Google key)',
 }
 
-export default function DispatchPanel({ state, onArm, onClose, onReplay }) {
+export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch }) {
   const { armed, loading, error, result } = state
   return (
     <section className="dispatch" aria-labelledby="dp-title">
@@ -58,7 +58,12 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay }) {
             <Side title="Golden Minute" side={result.agent} gm />
           </div>
           {result.reason && <p className="dp-reason">{result.reason}</p>}
-          {result.traffic_reason && <p className="dp-reason dp-traffic">{result.traffic_reason}</p>}
+          {result.traffic_reason && (
+            <div className="dp-reason dp-traffic">
+              <p>{result.traffic_reason}</p>
+              {onWatch && <button className="dp-watch" onClick={onWatch}>Watch the camera</button>}
+            </div>
+          )}
           <div className="dp-hosp">
             <span className="dp-h">H</span>
             <div>

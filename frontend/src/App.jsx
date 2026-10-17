@@ -264,6 +264,13 @@ export default function App() {
   const day = days.includes(pickedDay) ? pickedDay : initial
 
   const dispatch = useDispatch(day, playback)
+  const [camera, setCamera] = useState(null)
+  const jam = useMemo(() => {
+    const r = dispatch.state.result
+    const note = r && [r.agent, r.baseline].find((s) => s && !s.error && s.camera_note)?.camera_note
+    const cam = note && data.cameras.find((c) => c.name === note.camera)
+    return cam && { camera_id: cam.camera_id, text: r.traffic_reason }
+  }, [dispatch.state.result, data.cameras])
   const dispatching = dispatch.state.result || dispatch.state.loading
 
   const calls = useMemo(
@@ -280,7 +287,8 @@ export default function App() {
       <div className="stage">
         <CityMap calls={dispatching ? [] : calls} now={playback.now} cameras={data.cameras} posts={data.posts}
           neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}
-          onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed} />
+          onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
+          camera={camera} onCamera={setCamera} jam={jam} />
       </div>
       <div className="left">
         <header className="top glass">
@@ -300,7 +308,8 @@ export default function App() {
       </div>
       <Legend />
       <aside className="side glass">
-        <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay} />
+        <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
+          onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))} />
         <VersionLog />
         <Sources />
       </aside>

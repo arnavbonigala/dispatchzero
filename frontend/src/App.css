@@ -77,8 +77,11 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 }
 .cam-card { position: absolute; z-index: 4; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(360px, calc(100% - 32px)); padding: 12px; display: grid; gap: 8px; font-size: 0.82rem; }
 .cam-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.cam-card img { width: 100%; border-radius: 6px; background: #000; }
-.cam-card span { color: var(--muted); }
+.cam-media { position: relative; aspect-ratio: 4 / 3; border-radius: 6px; overflow: hidden; background: #000; }
+.cam-media video, .cam-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cam-live { position: absolute; top: 8px; left: 8px; padding: 2px 7px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; background: var(--bad); color: #fff; }
+.cam-note { margin: 0; font-size: 0.8rem; line-height: 1.4; padding: 8px 10px; border-radius: 6px; background: var(--raise); box-shadow: inset 3px 0 0 var(--bad); }
+.cam-stats { color: var(--muted); }
 
 .maplibregl-ctrl-attrib { background: rgba(22, 25, 30, 0.85) !important; color: var(--muted); }
 .maplibregl-ctrl-attrib a { color: var(--ink); }
@@ -109,7 +112,10 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .dot.eng { background: var(--engine); }
 .dot.off { background: transparent; border: 1px solid var(--muted); }
 .dp-reason { margin: 0; font-size: 0.82rem; line-height: 1.45; padding: 10px 12px; border-radius: 8px; background: var(--raise); }
-.dp-traffic { box-shadow: inset 3px 0 0 var(--bad); }
+.dp-traffic { box-shadow: inset 3px 0 0 var(--bad); display: grid; gap: 8px; }
+.dp-traffic p { margin: 0; }
+.dp-watch { justify-self: start; font: inherit; font-size: 0.78rem; font-weight: 600; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.dp-watch::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--bad); }
 .dp-hosp { display: flex; gap: 10px; align-items: center; font-size: 0.8rem; }
 .dp-hosp div { display: grid; }
 .dp-hosp span:not(.dp-h) { color: var(--muted); font-size: 0.75rem; }
