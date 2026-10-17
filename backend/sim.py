@@ -34,7 +34,7 @@ CAMERA_RADIUS_M = 600
 SLOW_N = 10
 SLOW_MIN_CALLS = 50
 OVERALL_TOLERANCE_S = 5.0
-PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
+PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority", "life_threatening")
 ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
 BANNED_ATTRS = {"gi_frame", "gi_code", "gi_yieldfrom", "cr_frame", "cr_code", "cr_await", "ag_frame", "ag_code", "f_globals", "f_locals", "f_builtins", "f_back", "f_code", "tb_frame", "tb_next", "co_consts", "mro"}
 BANNED_NAMES = {"open", "eval", "exec", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "__import__", "input", "breakpoint", "memoryview", "type", "object", "super"}
@@ -206,6 +206,8 @@ def load_policy(policy, world):
     mod.BUCKET_OF = dict(BUCKET_OF)
     mod.ENGINES = dict(world.engines)
     mod.ENGINE_LOAD = dict(world.engine_load)
+    mod.WEATHER = {k: dict(v) for k, v in world.weather.items()}
+    mod.NBHD = {k: dict(v) for k, v in world.nbhd_info.items()}
     spec.loader.exec_module(mod)
     return mod
 
@@ -229,6 +231,8 @@ class World:
         self.engine_offsets = {b: 0.0 for b in BUCKETS}
         self.engine_on_scene = 0.0
         self.engine_load = {}
+        self.weather = {}
+        self.nbhd_info = {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -254,6 +258,9 @@ class World:
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
+        for attr, name in (("weather", "weather.json"), ("nbhd_info", "neighborhoods.json")):
+            if (DATA / name).exists():
+                setattr(world, attr, json.loads((DATA / name).read_text()))
         if (DATA / "engines.json").exists():
             ej = json.loads((DATA / "engines.json").read_text())
             world.engines = {e["unit_id"]: e["post"] for e in ej["engines"]}
