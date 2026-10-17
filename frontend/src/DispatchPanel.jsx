@@ -4,7 +4,7 @@ function Unit({ kind, unit, first }) {
   const label = kind === 'engine' ? 'Engine' : 'Ambulance'
   return (
     <li className={first ? 'first' : ''}>
-      <i className={`dot ${kind === 'engine' ? 'eng' : 'amb'}`} /> <b>{label} {unit.unit_id}</b> <span>{mmss(unit.eta_s)}</span>
+      <i className={`dot ${kind === 'engine' ? 'eng' : 'amb'}`} /> <b>{label}</b> <span>{mmss(unit.eta_s)}</span>
     </li>
   )
 }
