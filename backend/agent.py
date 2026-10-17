@@ -21,6 +21,7 @@ Goal: make the 10 slowest neighborhoods faster (their median response time) with
 Your candidate must beat the current best on the training weeks, then pass the same test on a holdout week you never see.
 Big rewrites overfit the training weeks and slow the rest of the city. Prefer small, targeted changes to the current best.
 A known working idea: move about 3 spare units from the biggest downtown posts to posts in the slow neighborhoods, leaving everyone else alone.
+Moving 4 or more units looks free on training but slows everyone on busier weeks. Keep at most 3 units moved at once and at least 2 units at each downtown post. Look for gains in when units move (time buckets in post_plan) or in choose_unit, not in moving more units.
 
 You control two functions in one Python file:
 
