@@ -321,6 +321,7 @@ export default function App() {
 
   const dispatch = useDispatch(day, playback)
   const learning = useLearning(playback)
+  const [trained, setTrained] = useState(false)
   const police = usePolice(day, data.policeFixture)
   const [show, setShow] = useState({ police: true, live: true, reports: true, crashes: false })
   const incidents = useMemo(() => ({ police, live: [...(data.liveIncidents.police ?? []), ...(data.liveIncidents.chp ?? [])], crashes: data.crashes.hotspots ?? [],
@@ -371,7 +372,7 @@ export default function App() {
       </div>
       <Legend show={show} setShow={setShow} />
       <aside className="side glass">
-        {!learning.calls && (
+        {trained && !learning.calls && (
           <>
           <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
             onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))}>
@@ -380,7 +381,7 @@ export default function App() {
           <CallFlow calls={dispatching ? [] : calls} now={playback.now} playing={playback.playing} result={null} elapsed={0} />
           </>
         )}
-        <VersionLog onLearn={learning.onLearn} />
+        <VersionLog onLearn={learning.onLearn} trained={trained} onTrained={setTrained} />
       </aside>
       <Timeline {...playback} day={day} />
     </div>

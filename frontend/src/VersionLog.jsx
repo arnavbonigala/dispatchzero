@@ -137,14 +137,14 @@ function Detail({ s, parent }) {
 const fxLessons = Object.values(import.meta.glob('../../fixtures/engines_lessons.md', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
 const bullets = (text) => text.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2))
 
-export default function VersionLog({ onLearn }) {
+export default function VersionLog({ onLearn, trained, onTrained }) {
   const [versions, setVersions] = useState(() => parse(fxVersions))
   const [lessons, setLessons] = useState(() => bullets(fxLessons))
   const pts = useMemo(() => steps(versions), [versions])
   const [sel, setSel] = useState(null)
   const [playing, setPlaying] = useState(false)
   const latestKept = pts.findLastIndex((p) => p.accepted)
-  const at = Math.min(sel ?? latestKept, pts.length - 1)
+  const at = Math.min(sel ?? (trained ? latestKept : 0), pts.length - 1)
   const races = useMemo(() => new Set(pts.flatMap((p, i) => (i === 0 || i === latestKept || p.gain <= -BIG_GAIN_S ? [i] : []))), [pts, latestKept])
 
   useEffect(() => {
@@ -160,9 +160,13 @@ export default function VersionLog({ onLearn }) {
 
   useEffect(() => {
     if (!playing) return
-    const id = setTimeout(() => (at >= latestKept ? setPlaying(false) : setSel(at + 1)), races.has(at) ? RACE_MS : STEP_MS)
+    const finish = () => {
+      setPlaying(false)
+      onTrained?.(true)
+    }
+    const id = setTimeout(() => (at >= latestKept ? finish() : setSel(at + 1)), races.has(at) ? RACE_MS : STEP_MS)
     return () => clearTimeout(id)
-  }, [playing, at, latestKept, races])
+  }, [playing, at, latestKept, races, onTrained])
 
   const raceAt = playing ? pts.findLastIndex((p, i) => i <= at && races.has(i)) : -1
   const learnV = raceAt >= 0 ? pts[raceAt].bestV : null
@@ -182,22 +186,35 @@ export default function VersionLog({ onLearn }) {
     setPlaying(true)
   }
   const kept = pts.filter((p) => p.accepted && p.n > 0).length
+  const idle = !trained && !playing && sel == null
 
   return (
     <section className="vl" aria-labelledby="vl-title"
       onKeyDown={(e) => (e.key === 'ArrowLeft' ? pick(at - 1) : e.key === 'ArrowRight' ? pick(at + 1) : null)}>
       <div className="vl-top">
-        <h2 id="vl-title">How the AI learned it</h2>
-        <button className="vl-play" onClick={play} aria-pressed={playing}>{playing ? '❚❚ Pause' : '▶ Replay learning'}</button>
+        <h2 id="vl-title">{trained ? 'How the AI learned it' : 'Train the AI'}</h2>
+        <button className={trained ? 'vl-play' : 'vl-play vl-train'} onClick={play} aria-pressed={playing}>
+          {playing ? '❚❚ Pause' : trained ? '▶ Replay learning' : '▶ Train'}
+        </button>
       </div>
-      <p className="vl-sub">{versions.length - 1} rules tried · {kept} kept · <b>{mmss(pts[at].best)}</b> average to first paramedic</p>
-      <Chart pts={pts} sel={at} setSel={pick} />
-      <div className="vl-nav">
-        <button onClick={() => pick(at - 1)} disabled={at === 0} aria-label="Previous step">◀</button>
-        <Detail s={pts[at]} parent={versions.find((v) => v.version === pts[at].parent)} />
-        <button onClick={() => pick(at + 1)} disabled={at === pts.length - 1} aria-label="Next step">▶</button>
-      </div>
-      {lessons.length > 0 && <p className="vl-lesson"><span>Lesson</span> {short(lessons[lessons.length - 1], 140)}</p>}
+      {idle ? (
+        <>
+          <p className="vl-intro">The AI writes and tests {versions.length - 1} dispatch rules on three weeks of real SF 911 calls, and keeps a rule only if it also wins on a fourth week it never trained on.</p>
+          <Chart pts={pts} sel={at} setSel={pick} />
+          <p className="vl-locked">Live dispatch unlocks when training finishes.</p>
+        </>
+      ) : (
+        <>
+        <p className="vl-sub">{versions.length - 1} rules tried · {kept} kept · <b>{mmss(pts[at].best)}</b> average to first paramedic</p>
+        <Chart pts={pts} sel={at} setSel={pick} />
+        <div className="vl-nav">
+          <button onClick={() => pick(at - 1)} disabled={at === 0} aria-label="Previous step">◀</button>
+          <Detail s={pts[at]} parent={versions.find((v) => v.version === pts[at].parent)} />
+          <button onClick={() => pick(at + 1)} disabled={at === pts.length - 1} aria-label="Next step">▶</button>
+        </div>
+        {lessons.length > 0 && <p className="vl-lesson"><span>Lesson</span> {short(lessons[lessons.length - 1], 140)}</p>}
+        </>
+      )}
     </section>
   )
 }

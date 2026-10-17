@@ -80,3 +80,8 @@
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @keyframes vl-tick { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .vl-check { animation: none; opacity: 1; } }
+
+.vl-train { background: var(--vl-best); border-color: var(--vl-best); color: #16191e; font-weight: 600; font-size: 0.8rem; padding: 5px 14px; }
+.vl-intro { margin: 6px 0 4px; font-size: 0.82rem; line-height: 1.4; color: var(--vl-muted); }
+.vl-locked { margin: 8px 0 0; font-size: 0.76rem; color: var(--vl-muted); }
+.vl-locked::before { content: '🔒'; margin-right: 6px; }
