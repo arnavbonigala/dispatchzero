@@ -48,9 +48,12 @@ function VersionChart({ versions }) {
 }
 
 function Feed({ versions }) {
+  const [all, setAll] = useState(false)
+  const shown = [...versions].reverse().slice(0, all ? undefined : 4)
   return (
+    <>
     <ol className="vl-feed" reversed>
-      {[...versions].reverse().map((v) => (
+      {shown.map((v) => (
         <li key={v.version} className={v.accepted ? 'vl-item' : 'vl-item vl-item-rejected'}>
           <div className="vl-head">
             <strong>{v.version}</strong>
@@ -64,6 +67,12 @@ function Feed({ versions }) {
         </li>
       ))}
     </ol>
+    {versions.length > 4 && (
+      <button className="vl-more" onClick={() => setAll(!all)} aria-expanded={all}>
+        {all ? 'Show latest 4' : `Show all ${versions.length}`}
+      </button>
+    )}
+    </>
   )
 }
 
@@ -71,7 +80,13 @@ export default function VersionLog() {
   const [versions, setVersions] = useState(null)
   const [error, setError] = useState(null)
   useEffect(() => {
-    const load = () => fetch('/api/versions').then((r) => r.json()).then(setVersions).catch(() => setError('API unreachable'))
+    const fixture = () => import('@fixtures/versions.jsonl?raw')
+      .then((m) => setVersions(m.default.trim().split('\n').map((l) => JSON.parse(l))))
+      .catch(() => setError('Versions unavailable'))
+    const load = () => fetch('/api/versions').then((r) => {
+      if (!r.ok) throw new Error(r.status)
+      return r.json()
+    }).then(setVersions).catch(fixture)
     load()
     const id = setInterval(load, 10000)
     return () => clearInterval(id)
