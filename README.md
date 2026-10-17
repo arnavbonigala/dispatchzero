@@ -95,6 +95,10 @@ Limits to state honestly: SF publishes no unit locations, so the simulator assum
 
 `data/speeds.json` holds `adopted`, the error `report`, `rel` (`"Neighborhood|bucket": multiplier`), and `nbhd_centers` (`"Neighborhood": [lat, lon]`) for the UI heatmap.
 
+## Learned drive times
+
+`sim.py --fit-eta` trains a gradient-boosted model (scikit-learn, absolute-error loss) on the training weeks' real drives, from each unit's usual post to the call. Inputs are road travel time, straight-line distance, hour, weekday, neighborhood, post and both endpoints' coordinates. It is adopted only if it lowers median drive-time error on the holdout week: current result 253 s → 197 s, with the median prediction 467 s vs 470 s actual (the old formula gave 604 s). When adopted (`data/eta.json`, `data/eta_model.pkl`), ambulance drive times come from the model plus a per-bucket shift that `--calibrate` fits. Baseline sim vs actual median: −2.9% on fit, −0.8% on frozen. Engines keep the road-time formula.
+
 ## Cameras in the simulator
 
 - `edge_slowdowns(readings, roads)` turns `CameraReading`s into `{edge_index: factor}`: road edges within 600 m of the camera whose OSM `ref` matches the camera's route (`US-101` → `US 101`, `SR-1` → `CA 1`) are slowed by the camera's `slowdown`. Readings with `slowdown <= 1` change nothing.

@@ -5,6 +5,7 @@ import importlib
 import importlib.util
 import json
 import os
+import pickle
 import random
 import shutil
 import statistics
@@ -444,6 +445,8 @@ class World:
         self.nbhd_info = {}
         self.forecast = {}
         self.nbhd_nodes = {}
+        self.learned = {}
+        self.learned_shift = {b: 0.0 for b in BUCKETS}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -469,6 +472,13 @@ class World:
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
+        meta = json.loads((DATA / "eta.json").read_text()) if (DATA / "eta.json").exists() else {}
+        if meta.get("adopted"):
+            model = pickle.loads((DATA / "eta_model.pkl").read_bytes())
+            X = eta_features(world, calls, meta["nbhds"])
+            n = len(world.post_nodes)
+            world.learned = dict(zip(calls["call_id"], model.predict(X).reshape(len(calls), n)))
+            world.learned_shift = meta.get("shift", world.learned_shift)
         fit = calls[calls["split"] != "frozen"].groupby("nbhd")[["lat", "lon"]].median()
         world.nbhd_nodes = dict(zip(fit.index, (int(n) for n in roads.nearest(fit["lat"], fit["lon"]))))
         for attr, name in (("weather", "weather.json"), ("nbhd_info", "neighborhoods.json"), ("forecast", "forecast.json")):
@@ -506,7 +516,9 @@ class World:
     def mult(self, hour, nbhd=None):
         return self.rel.get(f"{nbhd}|{BUCKET_OF[hour]}", 1.0)
 
-    def drive(self, post, node, hour, nbhd=None):
+    def drive(self, post, node, hour, nbhd=None, call_id=None):
+        if call_id in self.learned:
+            return float(self.learned[call_id][post]) + self.learned_shift[BUCKET_OF[hour]]
         return float(self.travel[post, node]) * self.mult(hour, nbhd) + self.offsets[BUCKET_OF[hour]]
 
     def return_drive(self, post, node, hour, nbhd=None):
@@ -556,7 +568,53 @@ def make_coverage(world):
     return coverage
 
 
-def make_eta(world, nodes):
+def eta_features(world, calls, nbhds, posts=None):
+    n = len(world.post_nodes)
+    p = np.tile(np.arange(n), len(calls)) if posts is None else np.asarray(posts)
+    rows = np.repeat(np.arange(len(calls)), n) if posts is None else np.arange(len(calls))
+    P = pd.DataFrame(world.posts)
+    lat, lon = calls["lat"].to_numpy()[rows], calls["lon"].to_numpy()[rows]
+    nodes = np.array([world.call_nodes[c] for c in calls["call_id"]])[rows]
+    code = {nb: i for i, nb in enumerate(nbhds)}
+    return np.column_stack([
+        np.asarray(world.travel)[p, nodes],
+        np.hypot((lat - P["lat"].to_numpy()[p]) * 111000, (lon - P["lon"].to_numpy()[p]) * 88000),
+        calls["hour"].to_numpy()[rows],
+        pd.to_datetime(calls["t"]).dt.dayofweek.to_numpy()[rows],
+        calls["nbhd"].map(code).fillna(-1).to_numpy()[rows],
+        p, lat, lon, P["lat"].to_numpy()[p], P["lon"].to_numpy()[p],
+    ])
+
+
+def fit_eta(world):
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    calls = pd.read_parquet(DATA / "calls.parquet")
+    calls = calls[calls["historical_unit"].isin(world.usual)].reset_index(drop=True)
+    posts = calls["historical_unit"].map(world.usual).to_numpy()
+    nbhds = sorted(calls["nbhd"].unique())
+    X = eta_features(world, calls, nbhds, posts)
+    y = calls["drive_s"].to_numpy()
+    tr, ho = (calls["split"] == "train").to_numpy(), (calls["split"] == "holdout").to_numpy()
+    model = HistGradientBoostingRegressor(loss="absolute_error", max_iter=300, learning_rate=0.05, max_leaf_nodes=15, min_samples_leaf=40,
+                                          categorical_features=[4, 5], random_state=0).fit(X[tr], y[tr])
+    learned = model.predict(X[ho])
+    current = np.array([float(world.travel[p, world.call_nodes[c]]) * world.mult(h, nb) + world.offsets[BUCKET_OF[h]] for p, c, h, nb in zip(posts[ho], calls["call_id"][ho], calls["hour"][ho], calls["nbhd"][ho])])
+    report = {
+        "holdout_median_abs_err_s": {"current": round(float(np.median(abs(current - y[ho])))), "learned": round(float(np.median(abs(learned - y[ho]))))},
+        "holdout_spearman": {"current": round(float(spearmanr(current, y[ho]).statistic), 3), "learned": round(float(spearmanr(learned, y[ho]).statistic), 3)},
+        "holdout_median_s": {"actual": float(np.median(y[ho])), "current": round(float(np.median(current))), "learned": round(float(np.median(learned)))},
+    }
+    adopted = report["holdout_median_abs_err_s"]["learned"] < report["holdout_median_abs_err_s"]["current"]
+    (DATA / "eta_model.pkl").write_bytes(pickle.dumps(model))
+    (DATA / "eta.json").write_text(json.dumps({"adopted": adopted, "nbhds": nbhds, "report": report}, indent=1))
+    return adopted, report
+
+
+def make_eta(world, nodes, ids=None):
+    ids = ids or {}
+    learned = world.learned
+    shift = dict(world.learned_shift)
     travel = world.travel
     offsets = dict(world.offsets)
     engine_offsets = dict(world.engine_offsets)
@@ -567,6 +625,8 @@ def make_eta(world, nodes):
         post = int(unit["post"])
         if not 0 <= post < n_posts:
             raise ValueError(f"no post {post}")
+        if unit.get("kind") != "engine" and ids.get(call["call_id"]) in learned:
+            return float(learned[ids[call["call_id"]]][post]) + shift[BUCKET_OF[int(call["hour"])]]
         b = BUCKET_OF[int(call["hour"])]
         off = engine_offsets if unit.get("kind") == "engine" else offsets
         return float(travel[post, nodes[call["call_id"]]]) * rel.get(f"{call.get('nbhd')}|{b}", 1.0) + off[b]
@@ -619,7 +679,8 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
         ebg = world.engine_background
         ei = 0
     tokens = {}
-    eta = make_eta(world, tokens)
+    ids = {}
+    eta = make_eta(world, tokens, ids)
     prev = dict(post)
     arrive = {u: 0 for u in world.units}
     processing = [min(c["processing_s"], c["entry_s"]) if dispatch_at_entry and c.get("entry_s") == c.get("entry_s") and c.get("entry_s") is not None and c["entry_s"] >= 0 else c["processing_s"] for c in calls]
@@ -654,6 +715,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
                     stats["relocations"] += 1
         token = f"call{len(tokens)}"
         tokens[token] = world.call_nodes[c["call_id"]]
+        ids[token] = c["call_id"]
         public = {"call_id": token, **{k: c[k] for k in PUBLIC if k in c}}
         node = tokens[token]
         duty = [u for u in world.units if on_duty(world.windows, u, t)] or world.units
@@ -666,7 +728,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
                 chosen = None
             if not isinstance(chosen, str) or chosen not in idle_ids:
                 stats["invalid_choice"] += 1
-                chosen = min(idle_ids, key=lambda u: world.drive(at(u), node, c["hour"], c["nbhd"]))
+                chosen = min(idle_ids, key=lambda u: world.drive(at(u), node, c["hour"], c["nbhd"], c["call_id"]))
         else:
             chosen = min(duty, key=lambda u: busy[u])
             stats["queued"] += 1
@@ -674,7 +736,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
         wait = start - t
         origin = pos(chosen, start)
         arrive[chosen] = 0
-        drive = world.drive(origin, node, c["hour"], c["nbhd"])
+        drive = world.drive(origin, node, c["hour"], c["nbhd"], c["call_id"])
         if trace:
             best_post = int(np.argmin(world.travel[:, node]))
             state = lambda u: "idle" if u in idle_ids else "busy" if u in duty else "off_duty"
@@ -685,7 +747,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
                 "n_idle": len(idle_ids),
                 "closest_post": best_post,
                 "closest_post_area": world.posts[best_post]["station_area"] if world.posts else None,
-                "closest_post_drive_s": round(world.drive(best_post, node, c["hour"], c["nbhd"]), 1),
+                "closest_post_drive_s": round(world.drive(best_post, node, c["hour"], c["nbhd"], c["call_id"]), 1),
                 "units_at_closest_post": {u: state(u) for u in world.units if at(u) == best_post},
                 "from_post_area": world.posts[origin]["station_area"] if world.posts else None,
             }
@@ -898,9 +960,13 @@ def replay(calls, policy="baseline", slowdowns=None, version=None, split="train"
 
 def calibrate(world, iters=10):
     calls = load_calls("fit")
+    learned = bool(world.learned)
     offsets = {b: 0.0 for b in BUCKETS}
     for i in range(iters):
-        world.offsets = offsets
+        if learned:
+            world.learned_shift = offsets
+        else:
+            world.offsets = offsets
         results, _ = simulate(world, calls, "baseline")
         gaps = {}
         for b, hs in BUCKETS.items():
@@ -910,6 +976,11 @@ def calibrate(world, iters=10):
         print(f"iter {i}: " + ", ".join(f"{b}={offsets[b]:+.0f}s" for b in BUCKETS))
         if all(abs(g) < 2 for g in gaps.values()):
             break
+    if learned:
+        world.learned_shift = offsets
+        meta = json.loads((DATA / "eta.json").read_text())
+        (DATA / "eta.json").write_text(json.dumps({**meta, "shift": offsets}, indent=1))
+        return offsets
     world.offsets = offsets
     (DATA / "calibration.json").write_text(json.dumps({"offsets": offsets}, indent=1))
     return offsets
@@ -1195,8 +1266,8 @@ def jam_test(world, camera_id, factor=4.0, split="holdout"):
     rows = []
     for c in load_calls(split):
         node = world.call_nodes[c["call_id"]]
-        plain = {p: world.drive(p, node, c["hour"], c["nbhd"]) for p in posts}
-        jam = {p: jammed.drive(p, node, c["hour"], c["nbhd"]) for p in posts}
+        plain = {p: world.drive(p, node, c["hour"], c["nbhd"], c["call_id"]) for p in posts}
+        jam = {p: jammed.drive(p, node, c["hour"], c["nbhd"], c["call_id"]) for p in posts}
         blind = min(posts, key=plain.get)
         aware = min(posts, key=jam.get)
         if jam[blind] > plain[blind] + 1:
@@ -1235,6 +1306,7 @@ def main():
     ap.add_argument("--fixtures", action="store_true")
     ap.add_argument("--worst", type=int, metavar="N")
     ap.add_argument("--fit-speeds", action="store_true")
+    ap.add_argument("--fit-eta", action="store_true")
     ap.add_argument("--offload-cap", type=float, metavar="MINUTES")
     ap.add_argument("--dispatch-at-entry", action="store_true")
     ap.add_argument("--engines", action="store_true")
@@ -1257,6 +1329,15 @@ def main():
         return write_fixtures(world)
     if a.jam_test:
         print(json.dumps(jam_test(world, a.jam_test, a.slowdown, a.split if a.split != "train" else "holdout"), indent=1))
+        return
+    if a.fit_eta:
+        adopted, report = fit_eta(world)
+        print(json.dumps(report, indent=1))
+        print("learned drive times adopted" if adopted else "learned drive times rejected: holdout error did not drop")
+        if adopted:
+            world = World.load(roads=world.roads)
+            calibrate(world)
+            print(json.dumps({k: {x: v[x] for x in ("sim_median_s", "actual_median_s", "error_pct", "drive_spearman", "drive_median_abs_err_s")} for k, v in calibration_report(world).items()}, indent=1))
         return
     if a.fit_speeds:
         adopted, report = fit_speeds(world)
