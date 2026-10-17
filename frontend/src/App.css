@@ -28,12 +28,12 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .hero { padding: 16px 16px 14px; }
 .eyebrow { margin: 0 0 6px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .hero-main { margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
-.hero-main .big { font-family: var(--mono); font-size: 3.2rem; line-height: 1; font-weight: 600; letter-spacing: -0.04em; color: var(--accent); font-variant-numeric: tabular-nums; }
-.hero-main span { font-size: 1.05rem; font-weight: 500; }
+.hero-main .big { font-family: var(--mono); font-size: 4.2rem; line-height: 1; font-weight: 600; letter-spacing: -0.04em; color: var(--accent); font-variant-numeric: tabular-nums; }
+.hero-main > span { font-size: 1.2rem; font-weight: 500; }
 .hero-compare { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-top: 14px; }
 .hero-compare div { display: grid; padding: 8px 12px; border-radius: 8px; background: var(--raise); }
 .hero-compare div.gm { box-shadow: inset 3px 0 0 var(--accent); }
-.hero-compare span { font-size: 0.72rem; color: var(--muted); }
+.hero-compare div > span { font-size: 0.72rem; color: var(--muted); }
 .hero-compare strong { font-family: var(--mono); font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .hero-compare i { font-style: normal; color: var(--muted); }
 .hero-sub { margin: 12px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border); list-style: none; display: grid; gap: 4px; font-size: 0.84rem; color: var(--muted); }
@@ -187,7 +187,7 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .live-spark circle { fill: var(--ink); }
 .live-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding-top: 8px; border-top: 1px solid var(--border); }
 .live-grid div { display: grid; gap: 1px; }
-.live-grid span { font-size: 0.68rem; color: var(--muted); }
+.live-grid div > span { font-size: 0.68rem; color: var(--muted); }
 .live-empty, .live-foot { margin: 0; font-size: 0.75rem; color: var(--muted); }
 .sys-live { width: 6px; height: 6px; border-radius: 50%; background: var(--good); animation: sys-blink 1.6s ease-in-out infinite; }
 @keyframes sys-blink { 50% { opacity: 0.25; } }
@@ -200,7 +200,7 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 @media (max-height: 800px) and (min-width: 901px) {
   .top { padding: 8px 12px; }
   .hero { padding: 12px 14px 10px; }
-  .hero-main .big { font-size: 2.5rem; }
+  .hero-main .big { font-size: 3.3rem; }
   .hero-compare { margin-top: 8px; }
   .hero-compare div { padding: 5px 10px; }
   .hero-compare strong { font-size: 1.15rem; }
@@ -214,3 +214,13 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 }
 .dur + .dur { margin-left: 0.28em; }
 .dur-u { font-family: 'IBM Plex Sans', sans-serif; font-size: 0.6em; font-weight: 500; margin-left: 0.06em; letter-spacing: 0; }
+
+.tally { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 10px 16px 12px; min-width: 430px; }
+.tally .eyebrow { margin: 0 0 6px; }
+.tally .eyebrow b { color: var(--ink); font-family: var(--mono); }
+.tally-row { display: grid; grid-template-columns: repeat(3, auto); gap: 22px; }
+.tally-row div { display: grid; gap: 1px; }
+.tally-row div > span { font-size: 0.7rem; color: var(--muted); }
+.tally-row b { font-family: var(--mono); font-size: 1.45rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.tally-row b.up { color: var(--good); }
+.tally-row em { font-style: normal; font-size: 0.72rem; color: var(--muted); }

@@ -6,7 +6,7 @@ import DispatchPanel from './DispatchPanel'
 import VersionLog from './VersionLog.jsx'
 import CallFlow from './CallFlow.jsx'
 import { dispatchIncident, loadCameras, loadFixtures, loadLive, loadLiveIncidents, loadPolice } from './data'
-import { C, clock, mmss, secOfDay } from './format'
+import { C, TARGET_S, clock, mmss, secOfDay } from './format'
 import './App.css'
 
 const DAY_S = 24 * 3600
@@ -192,6 +192,29 @@ function useLearning(playback) {
   return { onLearn: setStep, calls, step: shown, now }
 }
 
+function DayTally({ base, agent, day, now }) {
+  const rows = useMemo(() => {
+    const b = new Map(base.filter((c) => c.t.startsWith(day)).map((c) => [c.call_id, c.response_s]))
+    return agent.filter((c) => c.t.startsWith(day) && b.has(c.call_id))
+      .map((c) => ({ end: secOfDay(c.t) + Math.max(c.response_s, b.get(c.call_id)), a: c.response_s, b: b.get(c.call_id) }))
+  }, [base, agent, day])
+  const done = rows.filter((r) => r.end <= now)
+  if (!done.length) return null
+  const sum = (k) => done.reduce((t, r) => t + r[k], 0)
+  const within = (k) => done.filter((r) => r[k] <= TARGET_S).length
+  const saved = sum('b') - sum('a')
+  return (
+    <section className="tally glass" aria-label={`${dayLabel(day)} so far`}>
+      <p className="eyebrow">{dayLabel(day)} so far · <b>{done.length}</b> of {rows.length} calls</p>
+      <div className="tally-row">
+        <div><span>Avg to paramedic</span><b><Dur s={sum('a') / done.length} /></b><em>baseline <Dur s={sum('b') / done.length} /></em></div>
+        <div><span>Within 8 minutes</span><b>{within('a')}</b><em>baseline {within('b')}</em></div>
+        <div><span>Time saved</span><b className={saved >= 0 ? 'up' : ''}><Dur s={Math.abs(saved)} /></b><em>{saved >= 0 ? 'across these calls' : 'lost across these calls'}</em></div>
+      </div>
+    </section>
+  )
+}
+
 function LearnChip({ step, calls, now }) {
   const fast = calls.filter((c) => c.response_s <= 8 * 60 && c.response_s <= now).length
   return (
@@ -359,6 +382,7 @@ export default function App() {
           onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
           camera={camera} onCamera={setCamera} jam={jam} incidents={incidents} show={show} />
         {learning.calls && <LearnChip step={learning.step} calls={learning.calls} now={learning.now} />}
+        {!learning.calls && !dispatching && data.agent && <DayTally base={data.baseline.results} agent={data.agent.results} day={day} now={playback.now} />}
       </div>
       <div className="left">
         <header className="top glass">
