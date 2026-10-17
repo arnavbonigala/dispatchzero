@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: { exclude: ['maplibre-gl'] },
   resolve: {
     alias: { '@fixtures': fileURLToPath(new URL('../fixtures', import.meta.url)) },
   },
