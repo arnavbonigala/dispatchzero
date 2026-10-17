@@ -129,6 +129,58 @@ Each person runs Claude Code agents in parallel on sub-pieces. C starts before t
 | 3:45–4:30 | Freeze the policy version. Rehearse together, fix the flakiest piece, cut whatever isn't working (cameras first) | | | Demo runs 3 times cleanly |
 | 4:30–5:00 | README | Backup video | Final pitch | Submitted |
 
+## Task tracker
+
+Tick a box (`- [x]`) and push when a task is done. Each task links back to the timeline above.
+
+### Together
+- [x] Freeze contracts (`backend/contracts.py`)
+- [x] Repo skeleton, `.gitignore`, `requirements.txt`, README
+- [x] `fetch.py` downloading calls, posts, units, cameras, road graph
+- [x] Fixtures for B and C (`fixtures/`)
+- [x] Frontend scaffold (Vite + React + Leaflet)
+
+### A: data and simulator
+- [x] `fetch.py` done, including unit dispatch history for background load
+- [ ] `sim.py` replay with real road travel times and unit availability
+- [ ] Baseline policy running in the real simulator
+- [ ] Calibration: baseline sim median within 10% of actual (1:30 go/no-go)
+- [ ] Sim speed-up (cached travel times from posts)
+- [ ] `sim.py --self-check` passing
+- [ ] Worst-50 calls with context for the agent
+- [ ] Stretch: learned road speeds, kept only if frozen-week error drops
+- [ ] `edge_slowdowns()` wired into the simulator
+- [ ] With/without-jam test
+- [ ] README
+
+### B: cameras and UI
+- [ ] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
+- [ ] 10 cameras live with the slowdown formula
+- [ ] React map with call replay from fixtures
+- [ ] Camera markers (green/yellow/red, thumbnail on click)
+- [ ] Rush-hour jam clips recorded, plus replay mode
+- [ ] UI wired to the real API
+- [ ] "Dispatch now" panel with reason text
+- [ ] Playwright screenshots at 390px and 1440px
+- [ ] Backup video
+
+### C: agent and API
+- [ ] `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`
+- [ ] FastAPI serving fixture JSON
+- [ ] Swap the stub for the real `sim.py`
+- [ ] First 3 real iterations, prompt tuned
+- [ ] At least one version beats baseline on the frozen week
+- [ ] 6 to 10 iterations run, final version frozen
+- [ ] Version chart and diagnosis feed in the UI
+- [ ] Pitch with real numbers
+
+### Checkpoints
+- [ ] 1:30 go/no-go: calibration within 10%
+- [ ] 2:45: an accepted version beats baseline on the frozen week
+- [ ] 3:45: full loop visible in the UI
+- [ ] 4:30: demo runs 3 times cleanly
+- [ ] 5:00: submitted
+
 ## Demo script (3 minutes)
 
 1. **Hook (20s):** "In a cardiac arrest, every minute without care cuts survival by about 10%. SF's ambulance median is X minutes."

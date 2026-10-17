@@ -45,8 +45,25 @@ def fetch_rows(start, end):
         offset += 50000
 
 
+def build_dispatches(raw, calls):
+    d = raw.dropna(subset=["dispatch_dttm", "available_dttm"])[["call_number", "unit_id", "dispatch_dttm", "available_dttm"]].copy()
+    d["dispatch_dttm"] = pd.to_datetime(d["dispatch_dttm"])
+    d["available_dttm"] = pd.to_datetime(d["available_dttm"])
+    d = d[(d["available_dttm"] > d["dispatch_dttm"]) & (d["available_dttm"] - d["dispatch_dttm"] < pd.Timedelta(hours=6))]
+    first = set(zip(calls["call_id"], calls["historical_unit"]))
+    d["simulated"] = [k in first for k in zip(d["call_number"], d["unit_id"])]
+    return pd.DataFrame({
+        "call_id": d["call_number"],
+        "unit_id": d["unit_id"],
+        "start": d["dispatch_dttm"].dt.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end": d["available_dttm"].dt.strftime("%Y-%m-%dT%H:%M:%S"),
+        "simulated": d["simulated"],
+    }).sort_values("start").reset_index(drop=True)
+
+
 def build_calls(rows, start):
-    df = pd.DataFrame(rows)
+    raw = pd.DataFrame(rows)
+    df = raw.copy()
     df = df.dropna(subset=["on_scene_dttm", "response_dttm", "dispatch_dttm", "case_location", "station_area"])
     for c in ["received_dttm", "dispatch_dttm", "response_dttm", "on_scene_dttm", "available_dttm"]:
         df[c] = pd.to_datetime(df[c])
@@ -91,7 +108,7 @@ def build_calls(rows, start):
     ]
     index = {p["station_area"]: p["post"] for p in posts}
     units = {u: index[a] for u, a in homes.items()}
-    return calls, posts, units
+    return calls, posts, units, build_dispatches(raw, calls)
 
 
 def fetch_cameras():
@@ -130,11 +147,13 @@ def main():
 
     rows = fetch_rows(start, end)
     print(f"medic dispatch rows: {len(rows)}")
-    calls, posts, units = build_calls(rows, start)
+    calls, posts, units, dispatches = build_calls(rows, start)
     calls.to_parquet(DATA / "calls.parquet", index=False)
+    dispatches.to_parquet(DATA / "dispatches.parquet", index=False)
     (DATA / "posts.json").write_text(json.dumps(posts, indent=1))
     (DATA / "units.json").write_text(json.dumps(units, indent=1))
     print(f"calls: {len(calls)} ({calls.groupby('split').size().to_dict()}), posts: {len(posts)}, units: {len(units)}")
+    print(f"unit dispatches: {len(dispatches)} ({int(dispatches['simulated'].sum())} simulated, {int((~dispatches['simulated']).sum())} background)")
     print(f"historical median response: {calls['historical_s'].median():.0f}s")
 
     cams = fetch_cameras()
