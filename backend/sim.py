@@ -152,7 +152,7 @@ def load_policy(policy, world):
 
 
 class World:
-    def __init__(self, travel, back, post_nodes, call_nodes, homes, windows, background, factors, posts=()):
+    def __init__(self, travel, back, post_nodes, call_nodes, homes, windows, background, factors, posts=(), rel=None):
         self.travel = travel
         self.back = back
         self.post_nodes = post_nodes
@@ -163,6 +163,7 @@ class World:
         self.background = background
         self.factors = factors
         self.posts = list(posts)
+        self.rel = rel or {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, factors=None):
@@ -179,16 +180,20 @@ class World:
             roads.times(post_nodes, slowdowns),
             roads.times(post_nodes, slowdowns, reverse=True),
             post_nodes, call_nodes, homes, shift_windows(dispatches), background,
-            factors or load_factors(), posts,
+            factors or load_factors(), posts, load_rel(),
         )
         world.roads = roads
         return world
 
-    def drive(self, post, node, hour):
-        return float(self.travel[post, node]) * self.factors[BUCKET_OF[hour]]
+    def mult(self, hour, nbhd=None):
+        b = BUCKET_OF[hour]
+        return self.factors[b] * self.rel.get(f"{nbhd}|{b}", 1.0)
 
-    def return_drive(self, post, node, hour):
-        return float(self.back[post, node]) * self.factors[BUCKET_OF[hour]]
+    def drive(self, post, node, hour, nbhd=None):
+        return float(self.travel[post, node]) * self.mult(hour, nbhd)
+
+    def return_drive(self, post, node, hour, nbhd=None):
+        return float(self.back[post, node]) * self.mult(hour, nbhd)
 
     def move_time(self, a, b, hour):
         return self.drive(a, self.post_nodes[b], hour)
@@ -197,13 +202,15 @@ class World:
 def make_eta(world, nodes):
     travel = world.travel
     factors = dict(world.factors)
+    rel = dict(world.rel)
     n_posts = len(world.post_nodes)
 
     def eta(unit, call):
         post = int(unit["post"])
         if not 0 <= post < n_posts:
             raise ValueError(f"no post {post}")
-        return float(travel[post, nodes[call["call_id"]]]) * factors[BUCKET_OF[int(call["hour"])]]
+        b = BUCKET_OF[int(call["hour"])]
+        return float(travel[post, nodes[call["call_id"]]]) * factors[b] * rel.get(f"{call.get('nbhd')}|{b}", 1.0)
 
     return eta
 
@@ -219,6 +226,15 @@ def load_factors():
     return {b: 1.0 for b in BUCKETS}
 
 
+def load_rel():
+    path = DATA / "speeds.json"
+    if path.exists():
+        d = json.loads(path.read_text())
+        if d.get("adopted"):
+            return d["rel"]
+    return {}
+
+
 def load_calls(split=None):
     calls = pd.read_parquet(DATA / "calls.parquet")
     if split:
@@ -226,7 +242,7 @@ def load_calls(split=None):
     return calls.to_dict("records")
 
 
-def simulate(world, calls, policy):
+def simulate(world, calls, policy, trace=False):
     policy = load_policy(policy, world)
     n_posts = len(world.post_nodes)
     busy = {u: 0 for u in world.units}
@@ -277,16 +293,30 @@ def simulate(world, calls, policy):
                 chosen = None
             if not isinstance(chosen, str) or chosen not in idle_ids:
                 stats["invalid_choice"] += 1
-                chosen = min(idle_ids, key=lambda u: world.drive(post[u], node, c["hour"]))
+                chosen = min(idle_ids, key=lambda u: world.drive(post[u], node, c["hour"], c["nbhd"]))
         else:
             chosen = min(duty, key=lambda u: busy[u])
             stats["queued"] += 1
         start = max(busy[chosen], t)
         wait = start - t
-        drive = world.drive(post[chosen], node, c["hour"])
+        drive = world.drive(post[chosen], node, c["hour"], c["nbhd"])
+        if trace:
+            best_post = int(np.argmin(world.travel[:, node]))
+            state = lambda u: "idle" if u in idle_ids else "busy" if u in duty else "off_duty"
+            ctx = {
+                "processing_s": c["processing_s"],
+                "turnout_s": c["turnout_s"],
+                "n_on_duty": len(duty),
+                "n_idle": len(idle_ids),
+                "closest_post": best_post,
+                "closest_post_area": world.posts[best_post]["station_area"] if world.posts else None,
+                "closest_post_drive_s": round(world.drive(best_post, node, c["hour"], c["nbhd"]), 1),
+                "units_at_closest_post": {u: state(u) for u in world.units if post[u] == best_post},
+                "from_post_area": world.posts[post[chosen]]["station_area"] if world.posts else None,
+            }
         response = c["processing_s"] + wait + c["turnout_s"] + drive
         after = max(c["busy_s"] - c["turnout_s"] - c["drive_s"], MIN_ON_SCENE_S)
-        busy[chosen] = start + c["turnout_s"] + drive + after + world.return_drive(post[chosen], node, c["hour"])
+        busy[chosen] = start + c["turnout_s"] + drive + after + world.return_drive(post[chosen], node, c["hour"], c["nbhd"])
         results.append({
             "call_id": c["call_id"],
             "t": c["t"],
@@ -301,6 +331,7 @@ def simulate(world, calls, policy):
             "nbhd": c["nbhd"],
             "wait_s": round(wait, 1),
             "historical_drive_s": c["drive_s"],
+            **(ctx if trace else {}),
         })
     return results, stats
 
@@ -328,6 +359,65 @@ def paired_ci(a, b, n=1000, seed=0):
     diffs.sort()
     point = statistics.median(x for x, _ in pairs) - statistics.median(y for _, y in pairs)
     return {"median_diff_s": point, "ci95": [diffs[int(0.025 * n)], diffs[int(0.975 * n) - 1]], "n": len(pairs)}
+
+
+def worst_calls(world, calls, policy, n=50):
+    results, stats = simulate(world, calls, policy, trace=True)
+    for r in results:
+        r["controllable_s"] = round(r["wait_s"] + r["eta_s"], 1)
+        r["weekday"] = pd.Timestamp(r["t"]).day_name()
+        r["bucket"] = BUCKET_OF[r["hour"]]
+        r["avoidable_s"] = round(max(r["controllable_s"] - r["closest_post_drive_s"], 0), 1)
+    worst = sorted(results, key=lambda r: -r["controllable_s"])[:n]
+    keep = ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
+            "closest_post", "closest_post_area", "closest_post_drive_s", "units_at_closest_post", "n_idle", "n_on_duty"]
+    calls_by_id = {c["call_id"]: c for c in calls}
+    rows = [{k: (calls_by_id[r["call_id"]].get(k) if k == "station_area" else r.get(k)) for k in keep} for r in worst]
+    count = lambda key: dict(pd.Series([r[key] for r in worst]).value_counts().head(8))
+    avoidable = pd.DataFrame(results).groupby(["nbhd", "bucket"])["avoidable_s"].sum().sort_values(ascending=False).head(10)
+    return {
+        "summary": summarize(results, Path(str(policy)).stem, "train"),
+        "stats": stats,
+        "worst": rows,
+        "worst_by_nbhd": {k: int(v) for k, v in count("nbhd").items()},
+        "worst_by_bucket": {k: int(v) for k, v in count("bucket").items()},
+        "queued_in_worst": sum(r["wait_s"] > 0 for r in worst),
+        "top_avoidable_nbhd_bucket_s": {f"{a}|{b}": round(v) for (a, b), v in avoidable.items()},
+    }
+
+
+def fit_speeds(world, k=30):
+    calls = pd.DataFrame(load_calls())
+    calls["bucket"] = calls["hour"].map(BUCKET_OF)
+    calls["node"] = calls["call_id"].map(world.call_nodes)
+    calls["home"] = calls["historical_unit"].map(world.homes)
+    calls = calls.dropna(subset=["home"])
+    calls["base"] = [float(world.travel[int(h), n]) for h, n in zip(calls["home"], calls["node"])]
+    calls = calls[(calls["base"] > 30) & (calls["drive_s"] > 30)]
+    calls["ratio"] = calls["drive_s"] / calls["base"]
+    train, holdout, frozen = (calls[calls["split"] == s] for s in ["train", "holdout", "frozen"])
+
+    bucket_f = train.groupby("bucket")["ratio"].median()
+    cell = train.groupby(["nbhd", "bucket"])["ratio"].agg(["median", "size"])
+    rel = {}
+    for (nb, b), row in cell.iterrows():
+        raw = row["median"] / bucket_f[b]
+        rel[f"{nb}|{b}"] = round(float((row["size"] * raw + k) / (row["size"] + k)), 4)
+
+    def mae(df, use_rel):
+        pred = df["base"] * df["bucket"].map(bucket_f) * [rel.get(f"{nb}|{b}", 1.0) if use_rel else 1.0 for nb, b in zip(df["nbhd"], df["bucket"])]
+        return float((pred - df["drive_s"]).abs().median())
+
+    report = {s: {"citywide_mae_s": round(mae(df, False), 1), "learned_mae_s": round(mae(df, True), 1)} for s, df in [("train", train), ("holdout", holdout), ("frozen", frozen)]}
+    adopted = report["holdout"]["learned_mae_s"] < report["holdout"]["citywide_mae_s"]
+    centers = calls.groupby("nbhd")[["lat", "lon"]].median()
+    (DATA / "speeds.json").write_text(json.dumps({
+        "adopted": adopted,
+        "report": report,
+        "rel": rel,
+        "nbhd_centers": {nb: [round(r.lat, 5), round(r.lon, 5)] for nb, r in centers.iterrows()},
+    }, indent=1))
+    return adopted, report
 
 
 def replay(calls, policy="baseline", slowdowns=None, version=None, split="train", world=None):
@@ -476,6 +566,16 @@ def self_check():
             pass
     check_source((POLICIES / "baseline.py").read_text())
 
+    w = world_()
+    w.rel = {"x|midday": 1.5}
+    assert simulate(w, calls[:1], Base)[0][0]["eta_s"] == 150.0
+    eta = make_eta(w, {"call0": 2})
+    assert eta({"unit_id": "B", "post": 1}, {"call_id": "call0", "hour": 12, "nbhd": "x"}) == 150.0
+
+    rt, _ = simulate(world_(), calls, Base, trace=True)
+    assert rt[0]["closest_post"] == 1 and rt[0]["closest_post_drive_s"] == 100.0 and rt[0]["n_idle"] == 2, rt[0]
+    assert rt[1]["units_at_closest_post"] == {"B": "busy"}, rt[1]
+
     a = [{"call_id": str(i), "response_s": 100.0 + i} for i in range(200)]
     b = [{"call_id": str(i), "response_s": 130.0 + i} for i in range(200)]
     ci = paired_ci(a, b, n=200)
@@ -509,6 +609,8 @@ def main():
     ap.add_argument("--calibrate", action="store_true")
     ap.add_argument("--self-check", action="store_true")
     ap.add_argument("--fixtures", action="store_true")
+    ap.add_argument("--worst", type=int, metavar="N")
+    ap.add_argument("--fit-speeds", action="store_true")
     a = ap.parse_args()
     if a.self_check:
         return self_check()
@@ -519,7 +621,22 @@ def main():
         return
     if a.fixtures:
         return write_fixtures(world)
+    if a.fit_speeds:
+        adopted, report = fit_speeds(world)
+        print(json.dumps(report, indent=1))
+        print("learned speeds adopted, recalibrating" if adopted else "learned speeds rejected: holdout error did not drop")
+        if adopted:
+            world = World.load(roads=world.roads)
+            calibrate(world)
+            print(json.dumps(calibration_report(world), indent=1))
+        return
     calls = load_calls(a.split)
+    if a.worst:
+        out = worst_calls(world, calls, a.policy, a.worst)
+        if a.out:
+            Path(a.out).write_text(json.dumps(out, indent=1))
+        print(json.dumps(out, indent=1))
+        return
     try:
         results, stats = simulate(world, calls, a.policy)
     except PolicyRejected as e:
