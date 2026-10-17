@@ -70,8 +70,14 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .play { flex: none; width: 38px; height: 38px; border-radius: 7px; border: 0; cursor: pointer; font-size: 0.85rem; color: var(--bg); background: var(--accent); }
 .play:hover { background: #edc06a; }
 .clock { font-family: var(--mono); font-size: 1.2rem; font-weight: 600; font-variant-numeric: tabular-nums; width: 3.4em; }
-.day { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
-.timeline select { font: inherit; font-size: 0.82rem; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--raise); color: var(--ink); }
+.clock-wrap { display: grid; line-height: 1.15; }
+.day { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+.presets { display: flex; gap: 6px; flex: none; }
+.presets button { font: inherit; font-size: 0.78rem; font-weight: 600; padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--raise); color: var(--ink); cursor: pointer; white-space: nowrap; }
+.presets button span { font-family: var(--mono); font-weight: 500; color: var(--muted); margin-left: 4px; }
+.presets button:hover { border-color: var(--muted); }
+.presets button[aria-pressed='true'] { border-color: var(--accent); }
+.presets button[aria-pressed='true'] span { color: var(--accent); }
 
 .view-toggle {
   position: absolute; top: 120px; right: 392px; z-index: 1; width: 29px; height: 29px; padding: 0; border-radius: 4px; border: 0; cursor: pointer;
@@ -146,7 +152,9 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
   .side { position: static; width: auto; order: 4; overflow: visible; }
   .timeline { position: sticky; bottom: 8px; order: 5; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 8px; }
   .timeline input[type='range'] { order: 5; flex-basis: 100%; }
-  .day { margin-left: auto; }
+  .presets { order: 6; flex-basis: 100%; }
+  .presets button { flex: 1; padding: 6px 4px; font-size: 0.72rem; }
+  .presets button span { display: block; margin: 0; }
   .hero-main .big { font-size: 2.7rem; }
   .top { flex-wrap: wrap; }
   .maplibregl-ctrl-top-right { right: 0; }

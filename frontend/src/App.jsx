@@ -9,7 +9,6 @@ import { C, clock, mmss, secOfDay } from './format'
 import './App.css'
 
 const DAY_S = 24 * 3600
-const SPEEDS = [300, 600, 1800, 3600]
 const CAMERA_POLL_MS = 30000
 const INCIDENT_POLL_MS = 120000
 
@@ -68,7 +67,7 @@ const dayLabel = (d) =>
 function usePlayback() {
   const [now, setNow] = useState(6 * 3600)
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(600)
+  const speed = 600
   const last = useRef(null)
 
   useEffect(() => {
@@ -97,7 +96,7 @@ function usePlayback() {
     if (!playing && now >= DAY_S) setNow(0)
     setPlaying(!playing)
   }
-  return { now, setNow, playing, toggle, speed, setSpeed }
+  return { now, setNow, playing, toggle }
 }
 
 const DISPATCH_SPEED = 60 // simulated seconds per real second in the dispatch animation
@@ -253,25 +252,27 @@ function Hero({ headline }) {
   )
 }
 
-function Timeline({ now, setNow, playing, toggle, speed, setSpeed, day, days, setDay }) {
+const PRESETS = [['Morning rush', 8 * 3600 + 15 * 60], ['Midday', 12 * 3600 + 30 * 60], ['Evening rush', 17 * 3600 + 30 * 60]]
+
+function Timeline({ now, setNow, playing, toggle, day }) {
   return (
     <footer className="timeline glass">
       <button className="play" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
         {playing ? '❚❚' : '▶'}
       </button>
-      <span className="clock">{clock(now)}</span>
-      <input style={{ '--pct': `${(now / DAY_S) * 100}%` }} type="range" min={0} max={DAY_S} step={60} value={now}
-        onChange={(e) => setNow(Number(e.target.value))} aria-label="Replay time" />
-      {days.length > 1 ? (
-        <select value={day} onChange={(e) => setDay(e.target.value)} aria-label="Replay day">
-          {days.map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}
-        </select>
-      ) : (
+      <div className="clock-wrap">
+        <span className="clock">{clock(now)}</span>
         <span className="day">{dayLabel(day)}</span>
-      )}
-      <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} aria-label="Replay speed">
-        {SPEEDS.map((s) => <option key={s} value={s}>{s / 60}× min/s</option>)}
-      </select>
+      </div>
+      <input style={{ '--pct': `${(now / DAY_S) * 100}%` }} type="range" min={0} max={DAY_S} step={60} value={now}
+        onChange={(e) => setNow(Number(e.target.value))} aria-label="Time of day" />
+      <div className="presets" role="group" aria-label="Jump to a time of day">
+        {PRESETS.map(([label, t]) => (
+          <button key={label} aria-pressed={Math.abs(now - t) < 60} onClick={() => setNow(t)}>
+            {label} <span>{clock(t)}</span>
+          </button>
+        ))}
+      </div>
     </footer>
   )
 }
@@ -314,11 +315,9 @@ export default function App() {
   const data = useData()
   const playback = usePlayback()
   const [view, setView] = useState('agent')
-  const [pickedDay, setDay] = useState(null)
 
   const shown = view === 'agent' && data.agent ? data.agent : data.baseline
-  const { days, initial } = useMemo(() => daysOf(data.baseline.results), [data.baseline])
-  const day = days.includes(pickedDay) ? pickedDay : initial
+  const day = useMemo(() => daysOf(data.baseline.results).initial, [data.baseline])
 
   const dispatch = useDispatch(day, playback)
   const learning = useLearning(playback)
@@ -383,7 +382,7 @@ export default function App() {
         )}
         <VersionLog onLearn={learning.onLearn} />
       </aside>
-      <Timeline {...playback} day={day} days={days} setDay={setDay} />
+      <Timeline {...playback} day={day} />
     </div>
   )
 }
