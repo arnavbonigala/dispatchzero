@@ -20,6 +20,8 @@ DispatchZero is a closed loop for emergency response. It senses San Francisco th
 - [Agent loop](#agent-loop)
 - [Demand forecast](#demand-forecast)
 - [Live dispatch](#live-dispatch)
+- [Live city state](#live-city-state)
+- [Map UI](#map-ui)
 - [What-if experiments](#what-if-experiments)
 - [Incident layers](#incident-layers)
 - [API](#api)
@@ -80,17 +82,21 @@ flowchart LR
 | `backend/policies/` | `baseline.py`, hand-written references and every AI-written version (`e001.py` onward) |
 | `backend/agent.py` | Self-improvement loop: `--iters N [--candidates K] [--engines] [--traffic]`, `--headline` |
 | `backend/forecast.py` | Poisson demand forecast per neighborhood and hour |
-| `backend/daily.py` | Daily loop: fetch, calibrate if needed, re-score, learn, publish |
-| `backend/cameras.py` | Caltrans HLS video → YOLOv8 tracking → `CameraReading` |
+| `backend/daily.py` | Daily loop: fetch, calibrate if needed, re-score, learn, publish, then regenerate charts and live state |
+| `backend/cameras.py` | Caltrans HLS video → YOLOv8 tracking → `CameraReading`, plus an annotated frame per camera in `data/camera_frames/` |
+| `backend/live_state.py` | Records fleet state at every frozen-week call through `simulate(..., probe=)` → `fixtures/engines_state.json` |
+| `backend/charts.py` | Every README chart, from the scored frozen week → `docs/charts/` |
 | `backend/dispatch.py` | Live dispatch of one incident, baseline vs best policy, with nearby police and CHP incidents as `warnings` |
 | `backend/incidents.py` | SFPD calls, SFPD incident reports, CHP incidents and injury crashes for the map (see Incident layers): `--loop` live, `--history`, `--reports`, `--crashes` |
 | `backend/api.py` | FastAPI: `uvicorn --app-dir backend api:app --port 8000` |
 | `fixtures/` | Contract-shaped snapshots the UI can run on without the API |
 | `frontend/` | Vite + React + MapLibre + deck.gl |
 | `frontend/src/CityMap.jsx` | Replay map: neighborhoods, posts, calls as columns sized by response time, units en route, dispatch routes, 2D/3D view |
-| `frontend/src/CameraCard.jsx` | Live Caltrans video (hls.js) with the camera's reading and the dispatch it changed |
+| `frontend/src/CameraCard.jsx` | Live Caltrans video (hls.js), the YOLO-annotated frame, the camera's reading and the dispatch it changed |
 | `frontend/src/CallFlow.jsx` | Step-by-step call flow for replay and live dispatch |
-| `frontend/src/VersionLog.jsx` | Learning timeline: every rule tried, kept or rejected, and the lessons learned |
+| `frontend/src/VersionLog.jsx` | Train the AI: replays every rule tried with its code diff and gate checks, kept or rejected, and the lessons learned |
+| `frontend/src/SystemBar.jsx` | Live city state panel |
+| `frontend/src/Dur.jsx` | Durations as `1m 24s` |
 | `frontend/src/DispatchPanel.jsx` | Click-to-dispatch panel: baseline vs DispatchZero, reason, traffic reason, hospital |
 
 `sim.py` CLI:
@@ -291,6 +297,7 @@ flowchart LR
 - `World.load(slowdowns=...)` rebuilds travel times; `Roads.path(src, dst, slowdowns)` returns `(seconds, [[lat, lon], ...])` for the map.
 - `--jam-test CAMERA_ID` measures a jam's effect on the holdout week: calls whose best route crosses it, calls that switch unit, and seconds saved.
 - `--traffic` builds a typical slowdown per camera and time bucket from `data/camera_log.jsonl` (median of 3+ readings) and gives each bucket its own drive times for dispatch, `eta`, returns, moves and engines. `--traffic PROFILE_JSON` replays a saved profile, and sandboxed policies get the parent's exact profile. Calibration commands never run in traffic mode.
+- Each pass also saves `data/camera_frames/{camera_id}.jpg`: the clip's frame with the most tracked vehicles, each boxed with its track id, green if moving and red if stopped (the same rule as `moving_frac`), under a caption with the count and moving share. Readings carry `"frame"`, and `GET /camera_frame/{camera_id}` serves it.
 - `agent.py --traffic` freezes the profile at start, scores every candidate with it, lists the slowest cameras per bucket in the prompt, and keeps its own `*_traffic` versions, headline and lessons.
 
 ## Agent loop
@@ -327,6 +334,8 @@ Each candidate:
 5. Is logged to `runs/versions.jsonl` with its diagnosis, scores, verdict and reason. The best passer is kept; other passers are marked "beaten by NAME this round".
 
 In engine mode the objective is `weighted_mean_s` (life-threatening calls count double). `agent.py --headline` scores the newest kept version once on the frozen week and writes `runs/headline.json`. `--worst N` gives the agent the 50 calls with the most controllable time (queue wait + drive), each with the closest post, its drive time, which units were based there and their state, plus `avoidable_s`, and the top neighborhood × bucket cells by avoidable seconds.
+
+Every `--headline` also runs `write_diffs()`: a unified diff of each version against its parent, saved to `fixtures/engines_diffs.json` for the learning replay in the UI.
 
 ## Demand forecast
 
@@ -365,6 +374,35 @@ sequenceDiagram
 | `osm` | Learned road speeds |
 
 `traffic_reason` names the camera when a slowed stretch on the original pick's route changed the pick, for example: *"Cameras show US-101 : 17th Street at 3.5x normal travel time. Without the cameras this dispatcher would send M517; it sends M521 instead, about 72 s sooner."* CLI: `dispatch.py LAT LON T`.
+
+## Live city state
+
+`simulate(world, calls, policy, ..., probe=fn)` calls `fn(t, call, free_ambulance_posts, free_engine_posts, on_duty)` after every call, without changing any result. `live_state.py` uses it to record, for standard dispatch and the best version on the frozen week:
+
+| Field | Meaning |
+|---|---|
+| `amb_free`, `amb_duty` | Ambulances free right now, and on shift |
+| `eng_free` | Paramedic engines free right now |
+| `best_drive_s` | Drive time from the closest free ambulance or engine to each neighborhood, weighted by that hour's demand forecast |
+| `hourly` | Forecast vs actual calls, rain and temperature for every hour |
+
+Agent policies are replayed from their sandboxed decisions as usual, so the probe only runs simulator code. The panel follows the replay clock and the Baseline / DispatchZero toggle.
+
+## Map UI
+
+```mermaid
+flowchart LR
+  T[Train the AI<br/>replay every rule:<br/>diff + gate checks] --> U[Live dispatch unlocks]
+  P[Time presets<br/>08:15 · 12:30 · 17:30] --> D[Click the map<br/>to dispatch]
+  U --> D
+  D --> F[Call flow, routes,<br/>reason, hospital]
+  D --> C[Camera card<br/>video + YOLO frame]
+```
+
+- **Train first.** The side panel opens on Train the AI. Training replays each version in order with its code diff and checks (parsed and checked, sandboxed run, training weeks, held-out week, reviewer when recorded), and the map re-scores the day under each kept rule. Live dispatch unlocks when it finishes.
+- **Timeline.** Play, a scrubber and three presets (Morning rush 08:15, Midday 12:30, Evening rush 17:30). The time sets the moment a dispatched incident happens.
+- **Left column.** Headline, live city state, and the incident-layer toggles with a Map key popover. Sized to fit without scrolling down to 1280×720.
+- **Map.** 2D by default with a 3D toggle (buildings, calls as columns sized by response time).
 
 ## What-if experiments
 
@@ -412,6 +450,7 @@ Live dispatch returns `warnings`: frozen-week police calls within 500 m in the 4
 | `GET /results/{version}?split=frozen` | Per-call results for the replay |
 | `GET /policy/{version}` | Policy source |
 | `GET /cameras` | Latest camera readings with each camera's live stream URL |
+| `GET /camera_frame/{camera_id}` | The camera's latest YOLO-annotated frame |
 | `GET /dispatch?lat=&lon=&t=` | Live dispatch: baseline vs best policy |
 | `GET /incidents/live` | Latest live SFPD and CHP refresh, empty when over 15 minutes old |
 | `GET /incidents/police?day=YYYY-MM-DD` | Frozen-week SFPD calls on that day, or the Tuesday fixture |

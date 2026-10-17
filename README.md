@@ -84,7 +84,7 @@ flowchart LR
 1. **Sense.** Five weeks of every SF ambulance and paramedic-engine dispatch, the full drivable road network, hourly weather, neighborhood demographics, hospital handoff times, 33 live freeway cameras, live SFPD and CHP incidents, 90 days of police reports and every injury crash since 2021.
 2. **Model.** A discrete-event digital twin of SF's emergency fleet that reproduces the city's real response times to within 1%.
 3. **Learn.** Claude reads the twin's worst calls, writes a new dispatch policy in Python, and the twin scores it on weeks it studied and on a held-out week. Winners are kept, losers become lessons.
-4. **Act.** The best policy dispatches any incident you click on the live map, against the current state of every unit, and explains its choice in plain English.
+4. **Act.** The best policy dispatches any incident you click on the live map, against the current state of every unit, and explains its choice in plain English. A live city state panel shows what the twin knows at that moment: free ambulances and engines, how fast the closest free paramedic could reach the next call, and the demand forecast against actual calls.
 5. **Repeat daily.** `daily.py` fetches yesterday's calls, re-checks calibration, re-scores every kept rule and runs new learning rounds.
 
 ## Data sources
@@ -113,6 +113,12 @@ Built from those sources:
 | Road speeds | Speed multiplier per neighborhood and time of day | about 200 cells |
 | Engine workload | Each engine's typical runs per hour of day | 34 engines × 24 hours |
 
+## The demo
+
+1. **Train the AI.** Press Train and watch every rule the agent wrote replay in order: the real Python diff from the previous rule, then each check ticking off (parsed and checked, sandboxed run, training weeks, held-out week). Rejected rules stop in red at the gate that failed them, and the map re-scores the day under each kept rule.
+2. **Dispatch an incident.** Training unlocks live dispatch. Jump to Morning rush, Midday or Evening rush, click anywhere in San Francisco, and watch standard dispatch and DispatchZero send units side by side, step by step, with routes, the hospital leg and the reason in plain English.
+3. **Read the city.** The live city state panel, police and crash heatmaps, and live camera video with YOLO tracking show what the system sees at every moment.
+
 ## What made this hard
 
 **A digital twin with no GPS feed.** SF publishes no ambulance locations, so DispatchZero rebuilds the fleet from the dispatch record: posts from where calls happen, a home post for each of 57 ambulances, real shifts and busy times, queueing, relocation drives, and patients delivered to the actual hospital. 34 paramedic engines stay busy with their 9,998 real runs. The twin matches SF's real median response within 1.0% on the weeks it was fit to and 0.9% on the frozen week.
@@ -127,7 +133,7 @@ Built from those sources:
 
 **The agent found the lever itself.** SF's 34 paramedic engines beat the ambulance about 75% of the time when they go. The agent learned when to add one, by neighborhood, hour and each engine's own workload, with life-threatening calls counting double. Its rules read like a dispatcher's notes: *"Chinatown at hour 10 and Tenderloin and South of Market at midday show ambulances taking 800 to 1300 s while an idle engine is 200 to 450 s away."*
 
-**Computer vision in the dispatch loop.** `cameras.py` pulls live Caltrans video, tracks vehicles with YOLOv8, and turns their count and motion into a slowdown on the matching freeway roads. Live dispatch recomputes every unit's drive time and says when a jam changed its choice: *"Cameras show US-101 : 17th Street at 3.5x normal travel time. Without the cameras this dispatcher would send M517; it sends M521 instead, about 72 s sooner."*
+**Computer vision in the dispatch loop.** `cameras.py` pulls live Caltrans video, tracks vehicles across each clip with YOLOv8, and turns their count and motion into a slowdown on the matching freeway roads. Every camera card shows the annotated frame the model saw, with each tracked vehicle boxed green (moving) or red (stopped). Live dispatch recomputes every unit's drive time and says when a jam changed its choice: *"Cameras show US-101 : 17th Street at 3.5x normal travel time. Without the cameras this dispatcher would send M517; it sends M521 instead, about 72 s sooner."*
 
 ## Why it is a new operating system for the physical world
 
@@ -150,9 +156,11 @@ uv pip install --python .venv/bin/python -r requirements.txt
 cd frontend && npm install && npm run dev
 .venv/bin/python backend/agent.py --engines --iters 4
 .venv/bin/python backend/agent.py --engines --headline
+.venv/bin/python backend/live_state.py
+.venv/bin/python backend/charts.py
 ```
 
-`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, paramedic-engine dispatches, weather, neighborhood data, hospital handoff times, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph. `backend/cameras.py --once` takes a live camera reading. `backend/charts.py` regenerates every chart in this README from the scored results. `backend/incidents.py` adds SFPD calls, SFPD incident reports, CHP freeway incidents and injury crashes for the map (run it with `--loop` for live SFPD and CHP); see Incident layers in `ARCHITECTURE.md`.
+`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, paramedic-engine dispatches, weather, neighborhood data, hospital handoff times, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph. `backend/cameras.py --once` takes a live camera reading. `backend/live_state.py` records the twin's fleet state at every frozen-week call for the live panel, and `backend/charts.py` regenerates every chart in this README. `daily.py` reruns both after each new headline. `backend/incidents.py` adds SFPD calls, SFPD incident reports, CHP freeway incidents and injury crashes for the map (run it with `--loop` for live SFPD and CHP); see Incident layers in `ARCHITECTURE.md`.
 
 ## Architecture
 
