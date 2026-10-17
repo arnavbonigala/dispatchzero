@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CityMap from './CityMap'
+import SystemBar from './SystemBar'
 import DispatchPanel from './DispatchPanel'
 import VersionLog from './VersionLog.jsx'
 import CallFlow from './CallFlow.jsx'
@@ -79,6 +80,7 @@ function useDispatch(day, playback) {
   const [state, setState] = useState({ armed: false, loading: false, error: null, result: null })
   const [elapsed, setElapsed] = useState(0)
   const [runId, setRunId] = useState(0)
+  const [ms, setMs] = useState(null)
 
   useEffect(() => {
     if (!state.result) return
@@ -106,9 +108,11 @@ function useDispatch(day, playback) {
     const pad = (n) => String(n).padStart(2, '0')
     const t = `${day}T${pad(Math.floor(s / 3600) % 24)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`
     setState({ armed: false, loading: true, error: null, result: null })
+    const t0 = performance.now()
     dispatchIncident(lat, lon, t, '2')
       .then((result) => {
         setElapsed(0)
+        setMs(performance.now() - t0)
         setState({ armed: false, loading: false, error: null, result })
       })
       .catch((e) => setState({ armed: false, loading: false, result: null,
@@ -118,7 +122,7 @@ function useDispatch(day, playback) {
     setElapsed(0)
     setRunId((n) => n + 1)
   }
-  return { state, elapsed, arm, close, pick, replay }
+  return { state, elapsed, arm, close, pick, replay, ms }
 }
 
 const gain = (diff) => mmss(Math.abs(diff))
@@ -326,6 +330,7 @@ export default function App() {
           <ViewToggle view={view} setView={setView} agent={data.agent} />
         </header>
         <Hero headline={data.headline} />
+        <SystemBar day={day} now={playback.now} version={view === 'agent' ? 'best' : 'baseline'} dispatchMs={dispatch.ms} />
       </div>
       <Legend />
       <aside className="side glass">
