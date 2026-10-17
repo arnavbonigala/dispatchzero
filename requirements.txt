@@ -3,6 +3,7 @@ requests
 pyarrow
 osmnx
 networkx
+scipy
 fastapi
 uvicorn
 anthropic
