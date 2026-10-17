@@ -29,11 +29,12 @@ function short(text, max = 110) {
 
 function steps(versions) {
   let best = metric(versions[0])
+  let bestV = versions[0].version
   return versions.map((v, i) => {
     const m = metric(v)
     const gain = i > 0 && v.accepted && m != null ? m - best : null
-    if (v.accepted && m != null) best = m
-    return { ...v, n: i, m, best, gain }
+    if (v.accepted && m != null) [best, bestV] = [m, v.version]
+    return { ...v, n: i, m, best, bestV, gain }
   }).filter((s) => s.m != null)
 }
 
@@ -83,7 +84,7 @@ function Detail({ s }) {
 const fxLessons = Object.values(import.meta.glob('../../fixtures/engines_lessons.md', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
 const bullets = (text) => text.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2))
 
-export default function VersionLog() {
+export default function VersionLog({ onLearn }) {
   const [versions, setVersions] = useState(() => parse(fxVersions))
   const [lessons, setLessons] = useState(() => bullets(fxLessons))
   const pts = useMemo(() => steps(versions), [versions])
@@ -112,6 +113,12 @@ export default function VersionLog() {
     const id = setTimeout(() => setSel(at + 1), PLAY_MS)
     return () => clearTimeout(id)
   }, [playing, at, pts.length])
+
+  const learnV = playing ? pts[at]?.bestV : null
+  const learnN = playing ? pts[at]?.n : null
+  useEffect(() => {
+    onLearn?.(learnV && { version: learnV, n: learnN })
+  }, [learnV, learnN, onLearn])
 
   if (pts.length < 2) return null
   const pick = (i) => {

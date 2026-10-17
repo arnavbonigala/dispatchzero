@@ -123,6 +123,38 @@ function useDispatch(day, playback) {
 
 const gain = (diff) => mmss(Math.abs(diff))
 
+const LEARNING = Object.values(import.meta.glob('../../fixtures/engines_learning.json', { import: 'default', eager: true }))[0]
+const LEARN_HOLD_MS = 2500
+const LEARN_SETTLED_S = 600
+
+function useLearning(playback) {
+  const [step, setStep] = useState(null)
+  const [shown, setShown] = useState(null)
+  useEffect(() => {
+    if (step) return setShown(step)
+    const id = setTimeout(() => setShown(null), LEARN_HOLD_MS)
+    return () => clearTimeout(id)
+  }, [step])
+  const { playing, toggle } = playback
+  useEffect(() => {
+    if (step && playing) toggle()
+  }, [step, playing, toggle])
+  const calls = useMemo(() => {
+    const r = shown && LEARNING?.response_s[shown.version]
+    return r && LEARNING.calls.map((c, i) => ({ ...c, start: DAY_S - r[i] - LEARN_SETTLED_S, response_s: r[i] }))
+  }, [shown])
+  return { onLearn: setStep, calls, step: shown }
+}
+
+function LearnChip({ step, calls }) {
+  const fast = calls.filter((c) => c.response_s <= 8 * 60).length
+  return (
+    <p className="learn-chip glass" role="status">
+      {step.n === 0 ? 'Before learning' : `After step ${step.n}`} · <b>{fast}</b> of {calls.length} calls on {dayLabel(LEARNING.day)} reached in 8 min
+    </p>
+  )
+}
+
 const learned = Object.values(import.meta.glob('../../fixtures/learned.json', { import: 'default', eager: true }))[0]
 
 const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -236,6 +268,7 @@ export default function App() {
   const day = days.includes(pickedDay) ? pickedDay : initial
 
   const dispatch = useDispatch(day, playback)
+  const learning = useLearning(playback)
   const [camera, setCamera] = useState(null)
   const jam = useMemo(() => {
     const r = dispatch.state.result
@@ -257,10 +290,11 @@ export default function App() {
   return (
     <div className="app">
       <div className="stage">
-        <CityMap calls={dispatching ? [] : calls} now={playback.now} cameras={data.cameras} posts={data.posts}
+        <CityMap calls={learning.calls ?? (dispatching ? [] : calls)} now={learning.calls ? DAY_S : playback.now} cameras={data.cameras} posts={data.posts}
           neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}
           onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
           camera={camera} onCamera={setCamera} jam={jam} />
+        {learning.calls && <LearnChip step={learning.step} calls={learning.calls} />}
       </div>
       <div className="left">
         <header className="top glass">
@@ -285,7 +319,7 @@ export default function App() {
           <CallFlow calls={[]} now={0} result={dispatch.state.result} elapsed={dispatch.elapsed} />
         </DispatchPanel>
         <CallFlow calls={dispatching ? [] : calls} now={playback.now} playing={playback.playing} result={null} elapsed={0} />
-        <VersionLog />
+        <VersionLog onLearn={learning.onLearn} />
       </aside>
       <Timeline {...playback} day={day} days={days} setDay={setDay} />
     </div>
