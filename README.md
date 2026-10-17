@@ -109,6 +109,8 @@ A transported patient's ambulance spends a median 43 minutes between arriving at
 
 Caveat: `hospital_s` covers the whole hospital stay (offload, paperwork, cleanup), while SF's 20-minute standard (EMSA Policy 4000.1) covers patient offload alone at the 90th percentile. Per-hospital offload data: DataSF `6x9q-izga` (monthly 90th-percentile offload by hospital) and `t4sf-777q` (diversions).
 
+Choosing the hospital by drive plus that hospital's average offload (`data/hospitals.json`, last 6 months of `6x9q-izga`) was tested and dropped: on the holdout week it diverted 845 transports and moved the citywide median by −1 s (CI −8 to +2) and slow neighborhoods by −10 s (CI −21 to +5). SF rarely runs out of free ambulances (about 3 queued calls a week), so freeing them a few minutes sooner barely changes response times.
+
 ## Dispatch-at-entry what-if
 
 The 148 s median from call received to dispatch splits into received → entry (call-taking, median 98 s) and entry → dispatch (median 37 s). `sim.py --dispatch-at-entry --split holdout` replays the calls with each unit dispatched at entry instead, for example by an AI pre-alert as soon as the call is entered:
