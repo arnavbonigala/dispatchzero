@@ -59,6 +59,14 @@ Rules the simulator enforces:
 
 `units.json` spreads the 57 units across posts in proportion to training-week call volume by station area (largest remainder). The baseline policy keeps every unit at that home post and sends the closest idle unit. `unit_areas.json` keeps each unit's most frequent station area, used only to fit road speeds.
 
+## The goal
+
+The agent's job is to make SF's 10 slowest neighborhoods faster without slowing everyone else. `sim.py --calibrate` picks them from the baseline on the training weeks and saves `data/slow_nbhds.json`. Every summary includes `slow_median_s` and `slow_n`. `--compare baseline` returns:
+
+- `slow_nbhds`: paired median difference and 95% CI for calls in those neighborhoods
+- `everyone`: the same for all calls
+- `passes`: true when the slow-neighborhood CI is entirely below zero and the citywide median is at most 5 s slower (`OVERALL_TOLERANCE_S`)
+
 ## Splits and reporting
 
 - `train` (weeks 1 to 3): the agent diagnoses from these.
