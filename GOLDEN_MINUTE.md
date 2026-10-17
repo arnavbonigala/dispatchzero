@@ -157,6 +157,8 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] `edge_slowdowns()` wired into the simulator, plus `Roads.path()` for drawing routes
 - [x] With/without-jam test (`sim.py --jam-test CAMERA_ID`): freeway jams rarely touch in-city ambulance routes
 - [x] README
+- [x] Units free up at the hospital or scene (transport flags + OSM emergency hospitals), then drive back to post
+- [x] Hospital handoff what-if (`--offload-cap`): a 20-min cap makes everyone about 20 s faster at the median
 
 ### B: cameras and UI
 - [x] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
