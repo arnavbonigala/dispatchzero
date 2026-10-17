@@ -1,0 +1,4 @@
+{"version": "baseline", "parent": "", "diagnosis": "Closest idle unit from each unit's home station.", "train_median": 612.0, "frozen_median": 618.0, "accepted": true}
+{"version": "v001", "parent": "baseline", "diagnosis": "Bayview had no idle unit 17:00-19:00 on weekdays; repost one Mission unit to station area 17 in that window.", "train_median": 596.0, "frozen_median": 604.0, "accepted": true}
+{"version": "v002", "parent": "v001", "diagnosis": "Hold a reserve unit downtown overnight.", "train_median": 589.0, "frozen_median": 607.0, "accepted": false}
+{"version": "v003", "parent": "v001", "diagnosis": "Tenderloin calls cluster 10:00-14:00; shift two units to station area 3 midday.", "train_median": 581.0, "frozen_median": 590.0, "accepted": true}

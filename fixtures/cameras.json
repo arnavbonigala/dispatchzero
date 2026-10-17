@@ -1,0 +1,102 @@
+[
+ {
+  "camera_id": "TV327",
+  "name": "TV327 -- I-280 : John Daly Blvd",
+  "lat": 37.71046,
+  "lon": -122.4654,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 8,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TV322",
+  "name": "TV322 -- I-280 : US-101",
+  "lat": 37.7343,
+  "lon": -122.40983,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 11,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TV317",
+  "name": "TV317 -- I-280 : 6th Street Offramp",
+  "lat": 37.77145,
+  "lon": -122.3974,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 14,
+  "moving_frac": 0.2,
+  "slowdown": 3.2
+ },
+ {
+  "camera_id": "TV388",
+  "name": "TV388 -- SR-1 : Just South of Presidio Tunnel",
+  "lat": 37.79138,
+  "lon": -122.46968,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 17,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TV304",
+  "name": "TV304 -- I-80 : US-101",
+  "lat": 37.77025,
+  "lon": -122.40554,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 20,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TV316",
+  "name": "TV316 -- I-80 : 6th Street",
+  "lat": 37.77696,
+  "lon": -122.40347,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 23,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TV305",
+  "name": "TV305 -- US-101 : Just North of Candlestick Park",
+  "lat": 37.71069,
+  "lon": -122.39526,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 26,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TVD01",
+  "name": "TVD01 -- I-80 : Fremont",
+  "lat": 37.78537,
+  "lon": -122.39244,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 29,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TVD32",
+  "name": "TVD32 -- I-80 : Bay Bridge SAS Tower East",
+  "lat": 37.81526,
+  "lon": -122.35855,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 32,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ },
+ {
+  "camera_id": "TVD33",
+  "name": "TVD33 -- I-80 : Bay Bridge SAS Tower West",
+  "lat": 37.81525,
+  "lon": -122.35858,
+  "ts": "2026-10-17T17:30:00",
+  "vehicles": 35,
+  "moving_frac": 0.9,
+  "slowdown": 1.1
+ }
+]
