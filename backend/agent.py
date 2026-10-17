@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import sys
 from pathlib import Path
@@ -21,7 +22,14 @@ LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
 
 GOAL = "Goal: make the 10 slowest neighborhoods faster (their median response time) without making the citywide median more than 5 s slower than baseline."
-ENGINE_GOAL = "Goal: cut the citywide average time to the first paramedic (mean_s) by more than 60 s versus baseline, while keeping the 10 slowest neighborhoods faster than baseline. Each candidate must lower the training mean_s below the current best's."
+ENGINE_GOAL = "Goal: cut the urgency-weighted average time to the first paramedic (weighted_mean_s, where life-threatening calls count double) by more than 60 s versus baseline, while keeping the 10 slowest neighborhoods faster than baseline and keeping fire_delay_s (extra seconds your engine use adds to the fire department's own calls) low. Each candidate must lower the training weighted_mean_s below the current best's."
+
+ANGLES = {
+    "": ["Focus on where ambulances wait each hour (post_plan).", "Focus on which ambulance to send (choose_unit).",
+         "Focus on timing: which hours and time buckets get extra cover.", "Combine small changes to post_plan and choose_unit."],
+    "engines": ["Focus on which fire engine to send and when (send_engine).", "Focus on where ambulances wait (post_plan); use FORECAST for expected calls.",
+                "Focus on which ambulance to send (choose_unit), especially for life-threatening calls.", "Combine all three levers: post_plan, choose_unit and send_engine."],
+}
 
 MOVE_HINTS = """Big rewrites overfit the training weeks and slow the rest of the city. Prefer small, targeted changes to the current best.
 A known working idea: move about 3 spare units from the biggest downtown posts to posts in the slow neighborhoods, leaving everyone else alone.
@@ -63,10 +71,10 @@ Recent attempts (newest last):
 Worst training calls under the current best, with context. `avoidable_s` is controllable time beyond the drive from the closest post. `top_avoidable_nbhd_bucket_s` totals it per neighborhood and time bucket.
 {worst}
 
-Find one concrete improvement and write the new policy."""
+{angle} Find one concrete improvement and write the new policy."""
 
 
-ENGINE_NOTE = """Engine mode: the score is the time until the first paramedic is on scene, by ambulance or by fire engine. You may also define
+ENGINE_NOTE = """Engine mode: the score is the time until the first paramedic is on scene, by ambulance or by fire engine. You control three levers together: post_plan, choose_unit and send_engine. Calls carry a `life_threatening` flag, and those calls count double in the score. Injected globals also include `FORECAST` ("<nbhd>|<YYYY-MM-DDTHH>": expected calls that hour, fit on training weeks), `WEATHER` ("<YYYY-MM-DDTHH>": {rain_mm, temp_c}) and `NBHD` (neighborhood to {population, pct_65_plus}). You may also define
 
 def send_engine(call, engines, eta, ambulance_s) -> str | None
 
@@ -119,10 +127,10 @@ def gates(train, best_train, holdout=None):
             if s["stats"]["engine_conflicts"] > 2 * base:
                 return False, f"{s['split']}: {s['stats']['engine_conflicts']} engine conflicts vs baseline {base}"
     if EXTRA:
-        if train["mean_s"] >= best_train["mean_s"]:
-            return False, f"train: average {train['mean_s']:.0f}s not below best {best_train['mean_s']:.0f}s"
-        if holdout is not None and holdout["mean_s"] >= baseline_summary("holdout")["mean_s"]:
-            return False, f"holdout: average {holdout['mean_s']:.0f}s not below baseline {baseline_summary('holdout')['mean_s']:.0f}s"
+        if train[OBJ] >= best_train[OBJ]:
+            return False, f"train: weighted average {train[OBJ]:.0f}s not below best {best_train[OBJ]:.0f}s"
+        if holdout is not None and holdout[OBJ] >= baseline_summary("holdout")[OBJ]:
+            return False, f"holdout: weighted average {holdout[OBJ]:.0f}s not below baseline {baseline_summary('holdout')[OBJ]:.0f}s"
     elif train["slow_median_s"] >= best_train["slow_median_s"]:
         return False, f"train: slow median {train['slow_median_s']:.0f}s not below best {best_train['slow_median_s']:.0f}s"
     if train["vs_baseline"]["everyone"]["median_diff_s"] > OVERALL_TOLERANCE_S:
@@ -131,6 +139,13 @@ def gates(train, best_train, holdout=None):
         g = holdout["vs_baseline"]
         return False, f"holdout: slow {g['slow_nbhds']['median_diff_s']:+.0f}s CI [{g['slow_nbhds']['ci95'][0]:.0f}, {g['slow_nbhds']['ci95'][1]:.0f}], citywide {g['everyone']['median_diff_s']:+.0f}s"
     return True, "passed train and holdout"
+
+
+OBJ = "weighted_mean_s"
+
+
+def objective(train):
+    return train[OBJ] if EXTRA else train["slow_median_s"]
 
 
 def baseline_summary(split, cache={}):
@@ -150,9 +165,9 @@ def record(row):
     print(json.dumps(row), flush=True)
 
 
-def next_name():
-    nums = [int(p.stem[1:]) for p in POLICIES.glob(f"{PREFIX}[0-9][0-9][0-9].py")]
-    return f"{PREFIX}{max(nums, default=0) + 1:03d}"
+def next_names(k):
+    start = max((int(p.stem[1:]) for p in POLICIES.glob(f"{PREFIX}[0-9][0-9][0-9].py")), default=0) + 1
+    return [f"{PREFIX}{n:03d}" for n in range(start, start + k)]
 
 
 def seed():
@@ -162,44 +177,62 @@ def seed():
             "train_slow_median": train["slow_median_s"], "holdout_slow_diff": 0.0, "holdout_all_diff": 0.0, "reason": "reference"})
 
 
-def step(model):
+def step(model, k=4):
     rows = history()
     best = next(r["version"] for r in reversed(rows) if r["accepted"])
     best_train = evaluate(best, "train")
     base_train = evaluate("baseline", "train")
     worst = sim("--policy", best, "--split", "train", "--worst", "50")
-    slim = lambda s: {k: s[k] for k in ("slow_median_s", "slow_n", "median_s", "mean_s", "p90_s", "n", "stats") if k in s}
+    slim = lambda s: {f: s[f] for f in ("slow_median_s", "slow_n", "median_s", "mean_s", "weighted_mean_s", "lt_mean_s", "p90_s", "n", "stats") if f in s}
     recent = [{**{k: r.get(k) for k in ("version", "parent", "diagnosis", "accepted", "train_slow_median", "train_all_diff", "train_mean")},
                "reason": "failed the holdout gate" if str(r.get("reason", "")).startswith("holdout") else r.get("reason")} for r in rows[-5:]]
     near = [r for r in rows if str(r.get("reason", "")).startswith("holdout") and (POLICIES / f"{r['version']}.py").exists()]
     near = min(near, key=lambda r: r["train_slow_median"], default=None)
     near = (f"Closest rejected candidate ({near['version']}): it beat the current best on training but failed the holdout gate. "
             f"Consider a more conservative version of it.\n<near_miss>\n{(POLICIES / (near['version'] + '.py')).read_text()}</near_miss>\n\n") if near else ""
-    prompt = PROMPT.format(
+    context = dict(
         slow=", ".join(json.loads((ROOT / "data" / "slow_nbhds.json").read_text())["nbhds"]),
         best=best, summary=json.dumps(slim(best_train)), base=json.dumps(slim(base_train)),
         history="\n".join(json.dumps(r) for r in recent), near=near, code=(POLICIES / f"{best}.py").read_text(),
-        worst=json.dumps({k: v for k, v in worst.items() if k != "summary"}))
-    name = next_name()
+        worst=json.dumps({key: v for key, v in worst.items() if key != "summary"}))
+    system = SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS, goal=ENGINE_GOAL if EXTRA else GOAL)
+    angles = ANGLES["engines" if EXTRA else ""]
+    names = next_names(k)
+    with ThreadPoolExecutor(k) as pool:
+        done = list(pool.map(lambda i: candidate(names[i], best, best_train, PROMPT.format(**context, angle=angles[i % len(angles)]), system, model), range(k)))
+    passed = [(row, train) for row, train, ok in done if ok]
+    winner = min(passed, key=lambda p: objective(p[1]), default=(None, None))[0]
+    for row, _, ok in done:
+        if ok and row is not winner:
+            row |= {"accepted": False, "reason": f"beaten by {winner['version']} this round"}
+        if row is winner:
+            row["frozen_median"] = sim("--policy", row["version"], "--split", "frozen")["median_s"]
+        record(row)
+
+
+def candidate(name, best, best_train, prompt, system, model):
     row = {"version": name, "parent": best, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
+    train, ok = None, False
     try:
-        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS, goal=ENGINE_GOAL if EXTRA else GOAL), model))
+        row["diagnosis"], code = parse(ask(prompt, system, model))
         (POLICIES / f"{name}.py").write_text(code)
         train = evaluate(name, "train")
-        row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"], "train_mean": train["mean_s"]}
+        row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"], "train_mean": train["mean_s"],
+                "train_weighted_mean": train.get("weighted_mean_s"), "train_fire_delay_s": train["stats"].get("fire_delay_s")}
         ok, why = gates(train, best_train)
         if ok:
             holdout = evaluate(name, "holdout")
             g = holdout["vs_baseline"]
             row |= {"holdout_slow_diff": g["slow_nbhds"]["median_diff_s"], "holdout_slow_ci": g["slow_nbhds"]["ci95"], "holdout_all_diff": g["everyone"]["median_diff_s"],
                     "holdout_mean_diff": round(holdout["mean_s"] - baseline_summary("holdout")["mean_s"], 1)}
+            if holdout.get("lt_mean_s") is not None:
+                row["holdout_lt_mean_diff"] = round(holdout["lt_mean_s"] - baseline_summary("holdout")["lt_mean_s"], 1)
             ok, why = gates(train, best_train, holdout)
-        if ok:
-            row["frozen_median"] = sim("--policy", name, "--split", "frozen")["median_s"]
         row |= {"accepted": ok, "reason": why}
-    except (RuntimeError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
+    except (RuntimeError, ValueError, KeyError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
         row["reason"] = f"rejected: {str(e)[:300]}"
-    record(row)
+        ok = False
+    return row, train, ok
 
 
 def rescore():
@@ -253,6 +286,7 @@ def main():
     ap.add_argument("--headline", action="store_true")
     ap.add_argument("--rescore", action="store_true")
     ap.add_argument("--engines", action="store_true")
+    ap.add_argument("--candidates", type=int, default=4)
     a = ap.parse_args()
     if a.engines:
         global VERSIONS, HEADLINE, PREFIX, EXTRA
@@ -264,7 +298,7 @@ def main():
     if a.headline:
         return headline()
     for _ in range(a.iters):
-        step(a.model)
+        step(a.model, a.candidates)
 
 
 if __name__ == "__main__":
