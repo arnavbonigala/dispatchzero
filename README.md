@@ -49,6 +49,7 @@ flowchart LR
     A[DataSF 911 calls<br/>ambulance + engine dispatches]
     B[Caltrans live cameras<br/>YOLO vehicle tracking]
     C[OpenStreetMap roads<br/>weather, census, hospitals]
+    P[SFPD calls + reports, CHP,<br/>injury crashes]
   end
   subgraph Model
     D[Calibrated digital twin<br/>57 ambulances, 34 paramedic engines]
@@ -77,9 +78,10 @@ flowchart LR
   I -- rejected --> J --> G
   K --> L
   B --> K
+  P --> L
 ```
 
-1. **Sense.** Five weeks of every SF ambulance and paramedic-engine dispatch, the full drivable road network, hourly weather, neighborhood demographics, hospital handoff times, and 33 live freeway cameras.
+1. **Sense.** Five weeks of every SF ambulance and paramedic-engine dispatch, the full drivable road network, hourly weather, neighborhood demographics, hospital handoff times, 33 live freeway cameras, live SFPD and CHP incidents, 90 days of police reports and every injury crash since 2021.
 2. **Model.** A discrete-event digital twin of SF's emergency fleet that reproduces the city's real response times to within 1%.
 3. **Learn.** Claude reads the twin's worst calls, writes a new dispatch policy in Python, and the twin scores it on weeks it studied and on a held-out week. Winners are kept, losers become lessons.
 4. **Act.** The best policy dispatches any incident you click on the live map, against the current state of every unit, and explains its choice in plain English.
@@ -97,6 +99,10 @@ flowchart LR
 | [Historical weather](https://open-meteo.com/en/docs/historical-weather-api) | Open-Meteo | Hourly rain and temperature for demand forecasting | 840 hours |
 | [District 4 CCTV](https://cwwp2.dot.ca.gov/data/d4/cctv/cctvStatusD04.json) | Caltrans | Live freeway video, read by YOLOv8 vehicle tracking | 33 San Francisco cameras |
 | [Analysis Neighborhoods](https://data.sfgov.org/d/j2bu-swwd) | DataSF | Neighborhood boundaries for every call and the maps | 41 neighborhoods |
+| SFPD dispatched calls, [closed](https://data.sfgov.org/d/2zdj-bwza) and [real time](https://data.sfgov.org/d/gnap-fj3t) | DataSF | Urgent police calls on the map and as safety warnings for crews | 2,813 in the frozen week |
+| [SFPD incident reports](https://data.sfgov.org/d/wg3w-h783) | DataSF | Police-report heatmap, last 90 days per 150 m cell | 16,224 reports |
+| [Traffic crashes resulting in injury](https://data.sfgov.org/d/ubvf-ztfx) | DataSF | Injury-crash hotspot heatmap | 16,689 crashes since 2021 |
+| [CHP incident feed](https://media.chp.ca.gov/sa_xml/sa.xml) | California Highway Patrol | Live freeway incidents in San Francisco | live |
 
 Built from those sources:
 
