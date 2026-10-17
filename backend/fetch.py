@@ -29,8 +29,10 @@ WEEKS = 5
 FIELDS = [
     "call_number", "unit_id", "received_dttm", "entry_dttm", "dispatch_dttm", "response_dttm",
     "on_scene_dttm", "transport_dttm", "hospital_dttm", "available_dttm", "case_location", "station_area",
-    "neighborhoods_analysis_boundaries", "priority", "call_type",
+    "neighborhoods_analysis_boundaries", "priority", "call_type", "call_type_group",
 ]
+WEATHER = "https://archive-api.open-meteo.com/v1/archive"
+CENSUS = "https://data.sfgov.org/resource/4qbq-hvtt.json"
 
 
 def get_json(url, params=None):
@@ -104,6 +106,7 @@ def build_calls(rows, start):
         "nbhd": first["neighborhoods_analysis_boundaries"].fillna("Unknown"),
         "station_area": first["station_area"],
         "priority": first["priority"].fillna(""),
+        "life_threatening": first["call_type_group"].eq("Potentially Life-Threatening"),
         "processing_s": secs("dispatch_dttm", "received_dttm"),
         "entry_s": secs("entry_dttm", "received_dttm"),
         "turnout_s": secs("response_dttm", "dispatch_dttm"),
@@ -168,6 +171,28 @@ def demand_homes(calls, index, units):
         seats[area] += 1
     order = [index[a] for a, n in seats.sort_values(ascending=False).items() for _ in range(n)]
     return dict(zip(units, order))
+
+
+def fetch_weather(start, end):
+    w = get_json(WEATHER, {"latitude": 37.77, "longitude": -122.42, "start_date": str(start), "end_date": str(end - timedelta(days=1)),
+                           "hourly": "precipitation,temperature_2m", "timezone": "America/Los_Angeles"})["hourly"]
+    return {t[:13]: {"rain_mm": p, "temp_c": c} for t, p, c in zip(w["time"], w["precipitation"], w["temperature_2m"])}
+
+
+def fetch_neighborhoods():
+    rows = get_json(CENSUS, {
+        "$select": "geography_name,demographic_category_label,estimate",
+        "$where": "geography='neighborhood' AND source='acs5' AND end_year='2023' AND demographic_category_label in ('all demographics','65 to 74 years','75 years and over')",
+        "$limit": 5000,
+    })
+    agg = {}
+    for r in rows:
+        d = agg.setdefault(r["geography_name"], {"pop": 0.0, "old": 0.0})
+        if r["demographic_category_label"] == "all demographics":
+            d["pop"] = float(r["estimate"])
+        else:
+            d["old"] += float(r["estimate"])
+    return {n: {"population": round(d["pop"]), "pct_65_plus": round(100 * d["old"] / d["pop"], 1)} for n, d in sorted(agg.items()) if d["pop"]}
 
 
 def fetch_cameras():
@@ -264,6 +289,14 @@ def main():
     engine_dispatches.to_parquet(DATA / "engine_dispatches.parquet", index=False)
     (DATA / "engines.json").write_text(json.dumps(engines, indent=1))
     print(f"paramedic engines: {len(engines['engines'])}, engine dispatches: {len(engine_dispatches)}, medic calls with an engine on scene: {calls['engine_s'].notna().mean():.0%}")
+
+    weather = fetch_weather(start, end)
+    (DATA / "weather.json").write_text(json.dumps(weather))
+    print(f"weather hours: {len(weather)}, rainy: {sum(v['rain_mm'] > 0 for v in weather.values())}")
+
+    nbhds = fetch_neighborhoods()
+    (DATA / "neighborhoods.json").write_text(json.dumps(nbhds, indent=1))
+    print(f"neighborhood demographics: {len(nbhds)}")
 
     hospitals = fetch_hospitals()
     (DATA / "hospitals.json").write_text(json.dumps(hospitals, indent=1))
