@@ -124,6 +124,8 @@ function useDispatch(day, playback) {
 
 const gain = (diff) => mmss(Math.abs(diff))
 
+const learned = Object.values(import.meta.glob('../../fixtures/learned.json', { import: 'default', eager: true }))[0]
+
 function Hero({ headline }) {
   const f = headline.frozen
   const b = headline.baseline
@@ -141,6 +143,9 @@ function Hero({ headline }) {
         <ul className="hero-sub">
           <li><b>{gain(headline.vs_baseline.slow_nbhds.median_diff_s)}</b> faster in the 10 slowest neighborhoods</li>
           <li><b>{gain(f.p90_s - b.p90_s)}</b> faster for the slowest 10% of calls</li>
+          {f.nbhd_spread_s != null && b.nbhd_spread_s != null && (
+            <li>Gap between neighborhoods <b>{mmss(b.nbhd_spread_s)} → {mmss(f.nbhd_spread_s)}</b></li>
+          )}
         </ul>
       </div>
     </section>
@@ -250,7 +255,10 @@ export default function App() {
       <header className="top">
         <div className="brand">
           <h1>Golden Minute</h1>
-          <p>Real San Francisco 911 calls from a week the AI never saw</p>
+          <p>
+            Real San Francisco 911 calls from a week the AI never saw
+            {learned && <> · last learned {dayLabel(learned.last_learned)}</>}
+          </p>
         </div>
         <ViewToggle view={view} setView={setView} agent={data.agent} />
       </header>

@@ -48,3 +48,6 @@
 .vl-reason { color: var(--vl-muted); font-size: 0.8rem !important; }
 .vl-more { margin-top: 8px; font: inherit; font-size: 0.85rem; padding: 5px 12px; color: var(--vl-fg); background: var(--vl-card); border: 1px solid var(--vl-line); border-radius: 6px; cursor: pointer; }
 .vl-more:focus-visible { outline: 2px solid var(--vl-best); outline-offset: 2px; }
+.vl-lessons { margin-top: 12px; }
+.vl-lessons h3 { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--vl-muted); margin: 0 0 6px; }
+.vl-lessons ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.85rem; line-height: 1.4; }

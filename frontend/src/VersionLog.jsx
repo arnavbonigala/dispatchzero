@@ -42,6 +42,8 @@ function Chart({ versions }) {
 }
 
 function why(reason = '') {
+  if (reason.startsWith('vetoed by reviewer: ')) return `Reviewer vetoed it: ${reason.slice(20)}`
+  if (reason.includes('neighborhood spread')) return 'Widened the gap between neighborhoods'
   if (reason.startsWith('beaten by')) return 'Another idea this round did better'
   if (reason.includes('engine conflicts')) return 'Tied up too many fire engines'
   if (reason.includes('citywide')) return 'Slowed down the rest of the city'
@@ -85,9 +87,27 @@ function Steps({ versions }) {
   )
 }
 
+const fxLessons = Object.values(import.meta.glob('../../fixtures/engines_lessons.md', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
+const bullets = (text) => text.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2))
+
+function Lessons({ items }) {
+  if (!items.length) return null
+  return (
+    <div className="vl-lessons">
+      <h3>What it has learned</h3>
+      <ul>{items.slice(-3).reverse().map((l) => <li key={l}>{l}</li>)}</ul>
+    </div>
+  )
+}
+
 export default function VersionLog() {
   const [versions, setVersions] = useState(() => parse(fxVersions))
+  const [lessons, setLessons] = useState(() => bullets(fxLessons))
   useEffect(() => {
+    fetch('/api/lessons?mode=engines')
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((l) => l.length && setLessons(l))
+      .catch(() => {})
     fetch('/api/versions?mode=engines')
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(setVersions)
@@ -100,6 +120,7 @@ export default function VersionLog() {
       <h2 id="vl-title">How the AI learned it</h2>
       <p className="vl-sub">{versions.length - 1} rules written and tested, {kept} kept. {label}, training weeks.</p>
       <Chart versions={versions} />
+      <Lessons items={lessons} />
       <Steps versions={versions} />
     </section>
   )
