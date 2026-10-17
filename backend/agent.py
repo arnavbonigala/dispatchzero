@@ -207,8 +207,11 @@ def rescore():
     for r in rows:
         if not (POLICIES / f"{r['version']}.py").exists():
             continue
-        train = evaluate(r["version"], "train")
-        holdout = evaluate(r["version"], "holdout")
+        try:
+            train = evaluate(r["version"], "train")
+            holdout = evaluate(r["version"], "holdout")
+        except RuntimeError:
+            continue
         g = holdout["vs_baseline"]
         r |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"], "train_mean": train["mean_s"],
               "holdout_slow_diff": g["slow_nbhds"]["median_diff_s"], "holdout_slow_ci": g["slow_nbhds"]["ci95"], "holdout_all_diff": g["everyone"]["median_diff_s"],
