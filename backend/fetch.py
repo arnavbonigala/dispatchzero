@@ -107,8 +107,18 @@ def build_calls(rows, start):
         for i, r in enumerate(posts_df.itertuples())
     ]
     index = {p["station_area"]: p["post"] for p in posts}
-    units = {u: index[a] for u, a in homes.items()}
-    return calls, posts, units, build_dispatches(raw, calls)
+    usual = {u: index[a] for u, a in homes.items()}
+    return calls, posts, demand_homes(calls, index, sorted(usual)), usual, build_dispatches(raw, calls)
+
+
+def demand_homes(calls, index, units):
+    demand = calls[calls["split"] != "frozen"]["station_area"].value_counts()
+    share = demand / demand.sum() * len(units)
+    seats = share.astype(int)
+    for area in (share - seats).sort_values(ascending=False).index[: len(units) - seats.sum()]:
+        seats[area] += 1
+    order = [index[a] for a, n in seats.sort_values(ascending=False).items() for _ in range(n)]
+    return dict(zip(units, order))
 
 
 def fetch_cameras():
@@ -147,11 +157,12 @@ def main():
 
     rows = fetch_rows(start, end)
     print(f"medic dispatch rows: {len(rows)}")
-    calls, posts, units, dispatches = build_calls(rows, start)
+    calls, posts, units, usual, dispatches = build_calls(rows, start)
     calls.to_parquet(DATA / "calls.parquet", index=False)
     dispatches.to_parquet(DATA / "dispatches.parquet", index=False)
     (DATA / "posts.json").write_text(json.dumps(posts, indent=1))
     (DATA / "units.json").write_text(json.dumps(units, indent=1))
+    (DATA / "unit_areas.json").write_text(json.dumps(usual, indent=1))
     print(f"calls: {len(calls)} ({calls.groupby('split').size().to_dict()}), posts: {len(posts)}, units: {len(units)}")
     print(f"unit dispatches: {len(dispatches)} ({int(dispatches['simulated'].sum())} simulated, {int((~dispatches['simulated']).sum())} background)")
     print(f"historical median response: {calls['historical_s'].median():.0f}s")
