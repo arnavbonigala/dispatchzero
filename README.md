@@ -32,6 +32,7 @@ cd frontend && npm install && npm run dev
 | `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading` |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + Leaflet |
+| `PITCH.md` | C | 3-minute pitch script with the real frozen-week numbers, slide outline and judge Q&A |
 
 ## Policy contract
 

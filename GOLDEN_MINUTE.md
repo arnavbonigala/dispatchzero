@@ -182,7 +182,7 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] At least one version passes the slow-neighborhood goal on the holdout week
 - [x] 6 to 10 iterations run, final version frozen (13 run, v013 frozen: frozen week slow −14s, CI −36 to −5; citywide median +2.7s)
 - [x] Version chart and diagnosis feed in the UI
-- [ ] Pitch with real numbers
+- [x] Pitch with real numbers (`PITCH.md`: script, numbers sheet, slides, judge Q&A)
 
 ### Checkpoints
 - [x] 1:30 go/no-go: calibration within 10%
@@ -194,8 +194,8 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 ## Demo script (3 minutes)
 
 1. **Hook (20s):** "In a cardiac arrest, every minute without care cuts survival by about 10%. In SF, where you live decides how long you wait: the slowest neighborhoods wait about 3.5 minutes longer than downtown."
-2. **The loop (60s):** show the version chart. Read one diagnosis aloud, for example "Bayview had no idle unit at 6pm weekdays; repositioning M509." Show the improvement and the rejected candidates that failed the frozen-week gate.
-3. **The result (40s):** split-screen replay of a frozen-week Tuesday, slow neighborhoods highlighted, with their median under each side plus the citywide median. State the headline number and the calibration error.
+2. **The loop (60s):** show the version chart. Read one diagnosis aloud, for example e008: "Sunset/Parkside, Lakeshore, Outer Richmond and Oceanview calls wait 800 to 1,100 seconds for downtown ambulances while an idle paramedic engine is usually 200 to 400 seconds away." Show the improvement and the rejected candidates that failed the unseen holdout-week gate. Full script with real numbers: `PITCH.md`.
+3. **The result (40s):** replay a frozen-week day and flip the Baseline / Golden Minute toggle, slow neighborhoods highlighted, with the headline averages above the map. State the headline number and the calibration error.
 4. **Live cameras (40s):** Caltrans feed of a 101 jam (live or a clip recorded at rush hour). The segment turns red. A new call reroutes, and the reason appears on screen.
 5. **Close (20s):** what's next: real road speeds, fire engines, integration with dispatch centers.
 
