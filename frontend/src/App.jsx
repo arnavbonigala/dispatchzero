@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import CityMap from './CityMap'
 import DispatchPanel from './DispatchPanel'
 import VersionLog from './VersionLog.jsx'
+import CallFlow from './CallFlow.jsx'
 import { dispatchIncident, loadCameras, loadFixtures, loadLive } from './data'
 import { C, clock, mmss, secOfDay } from './format'
 import './App.css'
@@ -310,6 +311,7 @@ export default function App() {
       <aside className="side glass">
         <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
           onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))} />
+        <CallFlow calls={dispatching ? [] : calls} now={playback.now} result={dispatch.state.result} elapsed={dispatch.elapsed} />
         <VersionLog />
         <Sources />
       </aside>
