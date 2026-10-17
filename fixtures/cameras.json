@@ -4,11 +4,12 @@
   "name": "TV327 -- I-280 : John Daly Blvd",
   "lat": 37.71046,
   "lon": -122.4654,
-  "ts": "2026-10-17T17:30:00",
-  "vehicles": 8,
-  "moving_frac": 0.9,
-  "slowdown": 1.1,
-  "stream": "https://wzmedia.dot.ca.gov/D4/S280_at_John_Daly_Bl.stream/playlist.m3u8"
+  "ts": "2026-10-17T15:31:22-07:00",
+  "vehicles": 7,
+  "moving_frac": 1.0,
+  "slowdown": 1.0,
+  "stream": "https://wzmedia.dot.ca.gov/D4/S280_at_John_Daly_Bl.stream/playlist.m3u8",
+  "frame": "camera_frames/TV327.jpg"
  },
  {
   "camera_id": "TV322",
@@ -48,22 +49,24 @@
   "name": "TV304 -- I-80 : US-101",
   "lat": 37.77025,
   "lon": -122.40554,
-  "ts": "2026-10-17T17:30:00",
-  "vehicles": 20,
-  "moving_frac": 0.9,
-  "slowdown": 1.1,
-  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_JCT_101.stream/playlist.m3u8"
+  "ts": "2026-10-17T15:31:50-07:00",
+  "vehicles": 10,
+  "moving_frac": 0.8,
+  "slowdown": 1.3,
+  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_JCT_101.stream/playlist.m3u8",
+  "frame": "camera_frames/TV304.jpg"
  },
  {
   "camera_id": "TV316",
   "name": "TV316 -- I-80 : 6th Street",
   "lat": 37.77696,
   "lon": -122.40347,
-  "ts": "2026-10-17T17:30:00",
+  "ts": "2026-10-17T15:31:54-07:00",
   "vehicles": 23,
-  "moving_frac": 0.9,
-  "slowdown": 1.1,
-  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_6th_St.stream/playlist.m3u8"
+  "moving_frac": 0.74,
+  "slowdown": 1.78,
+  "stream": "https://wzmedia.dot.ca.gov/D4/E80_at_6th_St.stream/playlist.m3u8",
+  "frame": "camera_frames/TV316.jpg"
  },
  {
   "camera_id": "TV305",
@@ -81,11 +84,12 @@
   "name": "TVD01 -- I-80 : Fremont",
   "lat": 37.78537,
   "lon": -122.39244,
-  "ts": "2026-10-17T17:30:00",
-  "vehicles": 29,
-  "moving_frac": 0.9,
-  "slowdown": 1.1,
-  "stream": "https://wzmedia.dot.ca.gov/D4/W80_at_Fremont_St_Ofr.stream/playlist.m3u8"
+  "ts": "2026-10-17T15:32:02-07:00",
+  "vehicles": 9,
+  "moving_frac": 0.44,
+  "slowdown": 1.75,
+  "stream": "https://wzmedia.dot.ca.gov/D4/W80_at_Fremont_St_Ofr.stream/playlist.m3u8",
+  "frame": "camera_frames/TVD01.jpg"
  },
  {
   "camera_id": "TVD32",

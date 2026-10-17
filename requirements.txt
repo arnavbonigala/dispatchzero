@@ -8,5 +8,6 @@ fastapi
 uvicorn
 anthropic
 ultralytics
+lap
 opencv-python
 scikit-learn

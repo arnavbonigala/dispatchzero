@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).parents[1]
@@ -97,6 +98,7 @@ def cameras():
     return [{**r, "stream": r.get("stream") or streams.get(r["camera_id"])} for r in rows]
 
 
+<<<<<<< Updated upstream
 @app.get("/incidents/live")
 def incidents_live():
     """Latest incidents.py refresh: SFPD calls from the last few hours and CHP incidents in SF. Empty when stale."""
@@ -126,6 +128,16 @@ def incidents_crashes():
 def incidents_reports():
     """SFPD incident reports from the last 90 days, counted per 150 m cell, for the heatmap."""
     return load_json(DATA / "police_reports.json", FIXTURES / "police_reports.json")
+=======
+@app.get("/camera_frame/{camera_id}")
+def camera_frame(camera_id: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", camera_id):
+        raise HTTPException(404, "unknown camera")
+    path = first(DATA / "camera_frames" / f"{camera_id}.jpg", FIXTURES / "camera_frames" / f"{camera_id}.jpg")
+    if not path:
+        raise HTTPException(404, "no frame")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+>>>>>>> Stashed changes
 
 
 @app.get("/posts")

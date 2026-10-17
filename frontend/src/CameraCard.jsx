@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 function useHls(ref, src) {
   const [failed, setFailed] = useState(false)
@@ -32,6 +32,28 @@ function useHls(ref, src) {
   return failed
 }
 
+const FIXTURE_FRAMES = Object.fromEntries(
+  Object.entries(import.meta.glob('../../fixtures/camera_frames/*.jpg', { query: '?url', import: 'default', eager: true }))
+    .map(([path, url]) => [path.split('/').pop().replace('.jpg', ''), url]),
+)
+
+function Vision({ camera }) {
+  const sources = useMemo(
+    () => [`/api/camera_frame/${camera.camera_id}?t=${encodeURIComponent(camera.ts ?? '')}`, FIXTURE_FRAMES[camera.camera_id]].filter(Boolean),
+    [camera.camera_id, camera.ts],
+  )
+  const [i, setI] = useState(0)
+  useEffect(() => setI(0), [sources])
+  if (i >= sources.length) return null
+  return (
+    <figure className="cam-vision">
+      <img src={sources[i]} onError={() => setI(i + 1)}
+        alt={`YOLOv8 vehicle tracking on camera ${camera.camera_id}: ${camera.vehicles} vehicles, ${Math.round(camera.moving_frac * 100)}% moving`} />
+      <figcaption>Computer vision · YOLOv8 vehicle tracking{camera.ts && ` · read ${camera.ts.slice(11, 16)}`}</figcaption>
+    </figure>
+  )
+}
+
 export default function CameraCard({ camera, note, onClose }) {
   const ref = useRef(null)
   const failed = useHls(ref, camera.stream)
@@ -51,6 +73,7 @@ export default function CameraCard({ camera, note, onClose }) {
         )}
         {live && <span className="cam-live">Live</span>}
       </div>
+      <Vision camera={camera} />
       {note && <p className="cam-note">{note}</p>}
       <span className="cam-stats">
         {camera.vehicles} vehicles · {Math.round(camera.moving_frac * 100)}% moving · travel time ×{camera.slowdown.toFixed(1)}

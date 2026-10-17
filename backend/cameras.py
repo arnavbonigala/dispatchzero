@@ -15,6 +15,7 @@ DATA = Path(__file__).parents[1] / "data"
 LOG = DATA / "camera_log.jsonl"  # every reading, appended, so the simulator can learn typical congestion by time of day
 SF_TZ = ZoneInfo("America/Los_Angeles")  # readings are bucketed by San Francisco hour wherever this runs
 TRACKER = Path(__file__).with_name("trackers.yaml")
+FRAMES = DATA / "camera_frames"
 VEHICLES = [2, 3, 5, 7]  # COCO car, motorcycle, bus, truck
 CLIP_S = 3
 SAMPLE_FPS = 15  # at 10fps small fast cars stop overlapping frame to frame and lose their tracks
@@ -76,24 +77,44 @@ def read_clip(src, seconds=CLIP_S):
 
 
 def measure(frames, fps, model):
-    tracks = {}
+    tracks, boxes = {}, {}
     for i, frame in enumerate(frames):
         r = model.track(frame, persist=i > 0, tracker=str(TRACKER), classes=VEHICLES, imgsz=IMGSZ, conf=CONF, verbose=False)[0]
         if r.boxes.id is None:
             continue
-        for tid, (x, y, w, h) in zip(r.boxes.id.int().tolist(), r.boxes.xywh.tolist()):
+        for tid, (x, y, w, h), xyxy in zip(r.boxes.id.int().tolist(), r.boxes.xywh.tolist(), r.boxes.xyxy.tolist()):
             tracks.setdefault(tid, []).append((i, x, y, h))
-    speeds = []
-    for pts in tracks.values():
+            boxes.setdefault(i, []).append((tid, xyxy))
+    moving = {}
+    for tid, pts in tracks.items():
         if len(pts) < MIN_TRACK_FRAMES:
             continue
         (i0, x0, y0, _), (i1, x1, y1, _) = pts[0], pts[-1]
         box_h = float(np.median([p[3] for p in pts]))
-        speeds.append(math.hypot(x1 - x0, y1 - y0) / box_h / ((i1 - i0) / fps))
+        moving[tid] = math.hypot(x1 - x0, y1 - y0) / box_h / ((i1 - i0) / fps) > MOVING_BOX_H_PER_S
     # stable tracks over the clip, not per-frame boxes: YOLOv8n drops most cars in a dense queue on any one frame
-    vehicles = len(speeds)
-    moving_frac = float(np.mean([s > MOVING_BOX_H_PER_S for s in speeds])) if speeds else 1.0
-    return vehicles, moving_frac
+    vehicles = len(moving)
+    moving_frac = float(np.mean(list(moving.values()))) if moving else 1.0
+    best = max(boxes, key=lambda i: sum(t in moving for t, _ in boxes[i]), default=len(frames) - 1)
+    return vehicles, moving_frac, annotate(frames[best], boxes.get(best, []), moving, vehicles, moving_frac)
+
+
+def annotate(frame, boxes, moving, vehicles, moving_frac):
+    img = frame.copy()
+    k = max(1.0, img.shape[1] / 360)
+    line, font = max(1, round(k)), cv2.FONT_HERSHEY_SIMPLEX
+    for tid, (x0, y0, x1, y1) in boxes:
+        if tid not in moving:
+            continue
+        color = (94, 197, 34) if moving[tid] else (60, 60, 230)
+        cv2.rectangle(img, (int(x0), int(y0)), (int(x1), int(y1)), color, line)
+        cv2.putText(img, f"#{tid}", (int(x0), max(10, int(y0) - 4)), font, 0.4 * k, color, line, cv2.LINE_AA)
+    text = f"YOLOv8 | {vehicles} vehicles | {moving_frac:.0%} moving" if vehicles else "YOLOv8 | no vehicles tracked"
+    (tw, th), _ = cv2.getTextSize(text, font, 0.5 * k, line)
+    pad = round(6 * k)
+    cv2.rectangle(img, (0, 0), (tw + 2 * pad, th + 2 * pad), (20, 20, 20), -1)
+    cv2.putText(img, text, (pad, th + pad), font, 0.5 * k, (255, 255, 255), line, cv2.LINE_AA)
+    return img
 
 
 def slowdown(vehicles, moving_frac):
@@ -102,7 +123,9 @@ def slowdown(vehicles, moving_frac):
 
 def read_camera(cam, model, src=None):
     frames, fps = read_clip(src or cam["stream"])
-    vehicles, moving_frac = measure(frames, fps, model)
+    vehicles, moving_frac, img = measure(frames, fps, model)
+    FRAMES.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(FRAMES / f"{cam['camera_id']}.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
     return {
         "camera_id": cam["camera_id"],
         "name": cam["name"],
@@ -113,6 +136,7 @@ def read_camera(cam, model, src=None):
         "vehicles": vehicles,
         "moving_frac": round(moving_frac, 2),
         "slowdown": round(slowdown(vehicles, moving_frac), 2),
+        "frame": f"camera_frames/{cam['camera_id']}.jpg",
     }
 
 
