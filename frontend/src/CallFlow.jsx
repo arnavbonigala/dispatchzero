@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { TARGET_S, mmss } from './format'
 import './CallFlow.css'
 
-const WALK_SPEED = 120
-const HOLD_S = 240
 const INTRO_MS = 450
 const RECENT_S = 1800
 
@@ -46,46 +44,14 @@ function dispatchStages(r) {
   ].filter(Boolean).sort((a, b) => a.at - b.at)
 }
 
-function useWalk(calls, now, playing) {
-  const [call, setCall] = useState(null)
-  const [t, setT] = useState(0)
-  const live = useRef({ calls, now, playing })
-  live.current = { calls, now, playing }
-
+function useFollow(calls, now, playing) {
+  const [on, setOn] = useState(false)
   useEffect(() => {
-    let raf
-    let last = performance.now()
-    let cur = null
-    let rel = 0
-    const pick = () => {
-      const { calls: cs, now: n, playing: on } = live.current
-      if (!on) return
-      const started = cs.filter((c) => c.start <= n && c.start > n - RECENT_S)
-      const next = started.filter((c) => !cur || c.start > cur.start).at(-1) ?? cur
-      if (next && next !== cur) {
-        cur = next
-        rel = 0
-        setCall(next)
-      }
-    }
-    const tick = (ts) => {
-      const dt = (ts - last) / 1000
-      last = ts
-      if (!cur || !live.current.calls.includes(cur)) {
-        cur = null
-        pick()
-      } else {
-        rel += dt * WALK_SPEED
-        if (rel > Math.max(cur.ambulance_s, cur.response_s) + HOLD_S) pick()
-        setT(rel)
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [])
-
-  return { call: call && calls.includes(call) ? call : null, t }
+    if (playing) setOn(true)
+  }, [playing])
+  const recent = on ? calls.filter((c) => c.start <= now && c.start > now - RECENT_S) : []
+  const call = recent.find((c) => now < c.start + Math.max(c.ambulance_s, c.response_s)) ?? recent.at(-1) ?? null
+  return { call, t: call ? now - call.start : 0 }
 }
 
 function useIntro(result) {
@@ -128,7 +94,7 @@ function Flow({ title, stages, t, revealed = Infinity }) {
 }
 
 export default function CallFlow({ calls, now, playing, result, elapsed }) {
-  const walk = useWalk(calls, now, playing)
+  const walk = useFollow(calls, now, playing)
   const intro = useIntro(result)
   const live = result?.agent && !result.agent.error
 
