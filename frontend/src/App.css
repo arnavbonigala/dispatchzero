@@ -87,8 +87,6 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .maplibregl-ctrl-attrib a { color: var(--ink); }
 .maplibregl-ctrl-top-right { top: 6px; right: 382px; }
 
-.sources ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: 0.82rem; line-height: 1.35; color: var(--muted); }
-.sources b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
 
 .dispatch { display: grid; gap: 10px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .dp-head { display: flex; justify-content: space-between; align-items: baseline; }

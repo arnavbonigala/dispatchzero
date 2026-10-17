@@ -213,35 +213,6 @@ function Legend() {
   )
 }
 
-const SOURCES = [
-  ['8,607', 'SF 911 ambulance calls over 5 weeks'],
-  ['10,668', 'dispatches by 57 ambulances'],
-  ['9,998', 'dispatches by 34 paramedic fire engines, with locations'],
-  ['62%', 'of calls flagged life-threatening'],
-  ['10,033', 'intersections in the road network'],
-  ['5,165', 'real drives train its drive-time model (error 253 s → 197 s)'],
-  ['34,440', 'neighborhood-hour demand predictions from time, weather and demographics'],
-  ['', 'Lookahead: coverage of the next hour\'s expected calls before each dispatch'],
-  ['11', 'hospitals with real handoff times'],
-  ['33', 'live Caltrans freeway cameras'],
-  ['840', 'hours of weather, rain and temperature'],
-  ['41', 'neighborhoods with population and share 65+'],
-  ['', 'Each engine\'s hourly workload, and demand by hour and area'],
-]
-
-function Sources() {
-  return (
-    <section className="sources" aria-labelledby="sources-title">
-      <h2 id="sources-title">Data it learns from</h2>
-      <ul>
-        {SOURCES.map(([n, label]) => (
-          <li key={label}>{n && <b>{n}</b>} {label}</li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
 function ViewToggle({ view, setView, agent }) {
   return (
     <div className="toggle" role="group" aria-label="Dispatcher shown on the map">
@@ -315,7 +286,6 @@ export default function App() {
         </DispatchPanel>
         <CallFlow calls={dispatching ? [] : calls} now={playback.now} playing={playback.playing} result={null} elapsed={0} />
         <VersionLog />
-        <Sources />
       </aside>
       <Timeline {...playback} day={day} days={days} setDay={setDay} />
     </div>
