@@ -51,6 +51,7 @@ Injected globals:
 - `BUCKET_OF`: hour to time bucket (`night`, `morning_rush`, `midday`, `evening_rush`, `evening`)
 - `WEATHER`: `"2026-09-07T14"` (call `t[:13]`) to `{rain_mm, temp_c}`, hourly from the Open-Meteo archive
 - `NBHD`: neighborhood to `{population, pct_65_plus}`, ACS 2019 to 2023 via DataSF `4qbq-hvtt`
+- `FORECAST`: `"Neighborhood|2026-09-07T14"` to expected calls that hour (`backend/forecast.py`, fit on the training weeks only), empty until `data/forecast.json` exists
 
 Rules the simulator enforces:
 - Policies only see dispatcher-visible call fields: an opaque per-run `call_id`, `t`, `lat`, `lon`, `hour`, `nbhd`, `station_area`, `priority`, `life_threatening` (call type group is Potentially Life-Threatening, 62% of calls).
@@ -135,7 +136,7 @@ A policy can add:
 def send_engine(call: Call, engines: list[IdleUnit], eta, ambulance_s: float) -> str | None
 ```
 
-`engines` are idle paramedic engines (`kind: "engine"`, so `eta` uses engine timing), `ambulance_s` is the chosen ambulance's time from dispatch to scene, and `ENGINES` (engine to station post) and `ENGINE_LOAD` (`"E01|15"`: that engine's other dispatches per day in that hour, from the fit weeks) are injected. Without `send_engine`, the simulator sends the nearest idle engine exactly when history did. `stats.engine_conflicts` counts real engine calls that start while the simulator has that engine on a medical call, which is the price of sending more.
+`engines` are idle paramedic engines (`kind: "engine"`, so `eta` uses engine timing), `ambulance_s` is the chosen ambulance's time from dispatch to scene, and `ENGINES` (engine to station post) and `ENGINE_LOAD` (`"E01|15"`: that engine's other dispatches per day in that hour, from the fit weeks) are injected. Without `send_engine`, the simulator sends the nearest idle engine exactly when history did. `stats.engine_conflicts` counts real engine calls that start while the simulator has that engine on a medical call, which is the price of sending more. `stats.fire_delay_s` turns that into seconds: for each conflict, the next-closest idle engine's extra drive to that real call's location. Summaries also report `lt_mean_s` (life-threatening calls only) and `weighted_mean_s` (life-threatening calls count double).
 
 Frozen week, first paramedic on scene, paired against the baseline:
 

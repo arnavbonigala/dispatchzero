@@ -413,6 +413,7 @@ def load_policy(policy, world):
     mod.ENGINES = dict(world.engines)
     mod.ENGINE_LOAD = dict(world.engine_load)
     mod.WEATHER = {k: dict(v) for k, v in world.weather.items()}
+    mod.FORECAST = {k: v for k, v in world.forecast.items() if not k.startswith("_")}
     mod.NBHD = {k: dict(v) for k, v in world.nbhd_info.items()}
     random.seed(POLICY_SEED)
     spec.loader.exec_module(mod)
@@ -440,6 +441,7 @@ class World:
         self.engine_load = {}
         self.weather = {}
         self.nbhd_info = {}
+        self.forecast = {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -465,7 +467,7 @@ class World:
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
-        for attr, name in (("weather", "weather.json"), ("nbhd_info", "neighborhoods.json")):
+        for attr, name in (("weather", "weather.json"), ("nbhd_info", "neighborhoods.json"), ("forecast", "forecast.json")):
             if (DATA / name).exists():
                 setattr(world, attr, json.loads((DATA / name).read_text()))
         if (DATA / "engines.json").exists():
@@ -474,7 +476,11 @@ class World:
             world.engine_on_scene = ej["on_scene_s"]
             ed = pd.read_parquet(DATA / "engine_dispatches.parquet")
             ed = ed[~ed["simulated"]]
-            world.engine_background = sorted(zip(epoch(ed["start"]), epoch(ed["end"]), ed["unit_id"]))
+            nodes = np.full(len(ed), -1)
+            located = ed["lat"].notna().to_numpy() if "lat" in ed else np.zeros(len(ed), bool)
+            if located.any():
+                nodes[located] = roads.nearest(ed["lat"][located], ed["lon"][located])
+            world.engine_background = sorted(zip(epoch(ed["start"]), epoch(ed["end"]), ed["unit_id"], nodes.tolist()))
             world.engine_offsets = fit_engine_offsets(world)
             frozen = epoch([calls.loc[calls["split"] == "frozen", "t"].min()])[0]
             fit = ed[epoch(ed["start"]) < frozen]
@@ -576,7 +582,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
     results = []
     stats = {"queued": 0, "invalid_choice": 0, "policy_errors": 0, "relocations": 0}
     if engines:
-        stats.update(engine_sends=0, engine_conflicts=0)
+        stats.update(engine_sends=0, engine_conflicts=0, fire_delay_s=0.0)
         ebusy = {u: 0 for u in world.engines}
         esim = dict(ebusy)
         ebg = world.engine_background
@@ -664,9 +670,15 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
         extra = {}
         if engines:
             while ei < len(ebg) and ebg[ei][0] <= t:
-                s, e, u = ebg[ei]
+                s, e, u, *loc = ebg[ei]
                 if esim.get(u, 0) > s:
                     stats["engine_conflicts"] += 1
+                    target = loc[0] if loc else -1
+                    if target >= 0 and u in world.engines:
+                        h = int(s // 3600 % 24)
+                        own = world.engine_drive(world.engines[u], target, h)
+                        cover = min((world.engine_drive(world.engines[v], target, h) for v in world.engines if v != u and ebusy[v] <= s), default=own + esim[u] - s)
+                        stats["fire_delay_s"] = round(stats["fire_delay_s"] + max(cover - own, 0.0), 1)
                 if u in ebusy:
                     ebusy[u] = max(ebusy[u], e)
                 ei += 1
@@ -714,6 +726,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
             "historical_s": c["historical_s"],
             "hour": int(c["hour"]),
             "nbhd": c["nbhd"],
+            "life_threatening": bool(c.get("life_threatening", False)),
             "wait_s": round(wait, 1),
             "historical_drive_s": c["drive_s"],
             **extra,
@@ -742,6 +755,7 @@ def summarize(results, version, split, slow=None):
     slow = set(load_slow() if slow is None else slow)
     r = sorted(x["response_s"] for x in results)
     sr = [x["response_s"] for x in results if x["nbhd"] in slow]
+    lt = [x["response_s"] for x in results if x.get("life_threatening")]
     return {
         "version": version,
         "split": split,
@@ -749,6 +763,8 @@ def summarize(results, version, split, slow=None):
         "slow_n": len(sr),
         "median_s": statistics.median(r),
         "mean_s": round(statistics.mean(r), 1),
+        "lt_mean_s": round(statistics.mean(lt), 1) if lt else None,
+        "weighted_mean_s": round(sum(x["response_s"] * (2 if x.get("life_threatening") else 1) for x in results) / sum(2 if x.get("life_threatening") else 1 for x in results), 1),
         "p90_s": r[int(0.9 * (len(r) - 1))],
         "pct_under_8min": sum(x <= 480 for x in r) / len(r),
         "n": len(r),
@@ -997,6 +1013,21 @@ def self_check():
     we.engine_background = [(int(epoch(["2026-01-01T12:02:00"])[0]), int(epoch(["2026-01-01T12:30:00"])[0]), "E1")]
     re_, se = simulate(we, ec + [{**calls[2], "t": "2026-01-01T12:03:00"}], Engine, engines=True)
     assert se["engine_sends"] == 1 and se["engine_conflicts"] == 1 and re_[1]["engine_unit"] is None, (re_, se)
+
+    class FirstEngine(Base):
+        @staticmethod
+        def send_engine(call, engines, eta, ambulance_s):
+            return "E1" if any(e["unit_id"] == "E1" for e in engines) else None
+
+    wf = world_()
+    wf.engines = {"E1": 1, "E2": 0}
+    wf.engine_on_scene = 600.0
+    wf.engine_background = [(int(epoch(["2026-01-01T12:02:00"])[0]), int(epoch(["2026-01-01T12:30:00"])[0]), "E1", 1)]
+    _, sf = simulate(wf, ec[:1] + [{**calls[2], "t": "2026-01-01T12:03:00"}], FirstEngine, engines=True)
+    assert sf["engine_conflicts"] == 1 and sf["fire_delay_s"] == 100.0, sf
+    lt = [{"call_id": "a", "nbhd": "x", "response_s": 100.0, "life_threatening": True}, {"call_id": "b", "nbhd": "x", "response_s": 400.0, "life_threatening": False}]
+    sl = summarize(lt, "v", "x", [])
+    assert sl["lt_mean_s"] == 100.0 and sl["weighted_mean_s"] == 200.0 and sl["mean_s"] == 250.0, sl
 
     class BadEngine(Base):
         @staticmethod

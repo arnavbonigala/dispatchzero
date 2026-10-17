@@ -46,6 +46,8 @@ class Summary(TypedDict):
     slow_n: int
     median_s: float
     mean_s: float
+    lt_mean_s: float | None
+    weighted_mean_s: float
     p90_s: float
     pct_under_8min: float
     n: int
