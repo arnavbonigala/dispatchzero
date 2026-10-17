@@ -65,7 +65,7 @@ def build_calls(rows, start):
     raw = pd.DataFrame(rows)
     df = raw.copy()
     df = df.dropna(subset=["on_scene_dttm", "response_dttm", "dispatch_dttm", "case_location", "station_area"])
-    for c in ["received_dttm", "dispatch_dttm", "response_dttm", "on_scene_dttm", "available_dttm"]:
+    for c in ["received_dttm", "dispatch_dttm", "response_dttm", "on_scene_dttm", "hospital_dttm", "available_dttm"]:
         df[c] = pd.to_datetime(df[c])
     df["lon"] = df["case_location"].map(lambda p: p["coordinates"][0])
     df["lat"] = df["case_location"].map(lambda p: p["coordinates"][1])
@@ -92,8 +92,10 @@ def build_calls(rows, start):
         "historical_s": secs("on_scene_dttm", "received_dttm"),
         "historical_unit": first["unit_id"],
         "transported": first["hospital_dttm"].notna() if "hospital_dttm" in first else False,
+        "hospital_s": secs("available_dttm", "hospital_dttm") if "hospital_dttm" in first else float("nan"),
     })
     calls["busy_s"] = calls["busy_s"].fillna(calls["busy_s"].median())
+    calls["hospital_s"] = calls["hospital_s"].where(calls["hospital_s"].between(0, 6 * 3600))
     ok = (
         calls[["processing_s", "turnout_s", "drive_s"]].ge(0).all(axis=1)
         & calls["historical_s"].between(30, 3600)

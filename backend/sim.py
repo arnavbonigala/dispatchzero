@@ -289,7 +289,7 @@ def load_calls(split=None):
     return calls.to_dict("records")
 
 
-def simulate(world, calls, policy, trace=False):
+def simulate(world, calls, policy, trace=False, offload_cap_s=None):
     policy = load_policy(policy, world)
     n_posts = len(world.post_nodes)
     busy = {u: 0 for u in world.units}
@@ -370,6 +370,9 @@ def simulate(world, calls, policy, trace=False):
             }
         response = c["processing_s"] + wait + c["turnout_s"] + drive
         after = max(c["busy_s"] - c["turnout_s"] - c["drive_s"], MIN_ON_SCENE_S)
+        hosp = c.get("hospital_s")
+        if offload_cap_s is not None and hosp == hosp and hosp is not None and hosp > offload_cap_s:
+            after = max(after - (hosp - offload_cap_s), MIN_ON_SCENE_S)
         end = world.end_nodes.get(c["call_id"], node)
         busy[chosen] = start + c["turnout_s"] + drive + after
         prev[chosen] = int(np.argmin(world.travel[:, end]))
@@ -638,6 +641,13 @@ def self_check():
     assert rk[1]["from_post"] == 1 and rk[1]["eta_s"] == 100.0 and rk[1]["wait_s"] == 0, rk[1]
     assert rk[2]["from_post"] == 0 and rk[2]["eta_s"] == 400.0, rk[2]
 
+    kh = [{**kc[0], "hospital_s": 1500.0}, kc[1], kc[2]]
+    rh, _ = simulate(wc, kh, Home, offload_cap_s=1200.0)
+    assert rh[1]["wait_s"] == 0 and rh[1]["from_post"] == 1, rh[1]
+    rq, _ = simulate(wc, [{**kh[0]}, {**kc[1], "t": "2026-01-01T12:32:00"}], Home)
+    rr, _ = simulate(wc, [{**kh[0]}, {**kc[1], "t": "2026-01-01T12:32:00"}], Home, offload_cap_s=1200.0)
+    assert rq[1]["wait_s"] > 0 and rr[1]["wait_s"] == 0, (rq[1], rr[1])
+
     class Bad(Base):
         @staticmethod
         def choose_unit(call, idle, eta):
@@ -772,6 +782,7 @@ def main():
     ap.add_argument("--fixtures", action="store_true")
     ap.add_argument("--worst", type=int, metavar="N")
     ap.add_argument("--fit-speeds", action="store_true")
+    ap.add_argument("--offload-cap", type=float, metavar="MINUTES")
     ap.add_argument("--jam-test", metavar="CAMERA_ID")
     ap.add_argument("--slowdown", type=float, default=4.0)
     a = ap.parse_args()
@@ -799,6 +810,18 @@ def main():
             print(json.dumps(pick_slow(world), indent=1))
         return
     calls = load_calls(a.split)
+    if a.offload_cap is not None:
+        base, _ = simulate(world, calls, a.policy)
+        capped, _ = simulate(world, calls, a.policy, offload_cap_s=a.offload_cap * 60)
+        print(json.dumps({
+            "offload_cap_min": a.offload_cap,
+            "policy": Path(a.policy).stem,
+            "split": a.split,
+            "now": summarize(base, "now", a.split),
+            "capped": summarize(capped, "capped", a.split),
+            "vs_now": goal(capped, base),
+        }, indent=1))
+        return
     if a.worst:
         out = worst_calls(world, calls, a.policy, a.worst)
         if a.out:
