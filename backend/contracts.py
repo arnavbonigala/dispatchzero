@@ -42,7 +42,10 @@ class CallResult(TypedDict):
 class Summary(TypedDict):
     version: str
     split: str
+    slow_median_s: float
+    slow_n: int
     median_s: float
+    mean_s: float
     p90_s: float
     pct_under_8min: float
     n: int

@@ -29,6 +29,9 @@ FALLBACK_MPS = 8.0
 DETOUR = 1.3
 FREEWAY = {"motorway", "motorway_link"}
 CAMERA_RADIUS_M = 600
+SLOW_N = 10
+SLOW_MIN_CALLS = 50
+OVERALL_TOLERANCE_S = 5.0
 PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
 ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
 BANNED_NAMES = {"open", "eval", "exec", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "__import__", "input", "breakpoint", "memoryview", "type", "object", "super"}
@@ -380,21 +383,55 @@ def simulate(world, calls, policy, trace=False):
     return results, stats
 
 
-def summarize(results, version, split):
+def load_slow():
+    path = DATA / "slow_nbhds.json"
+    return json.loads(path.read_text())["nbhds"] if path.exists() else []
+
+
+def pick_slow(world):
+    results, _ = simulate(world, load_calls("train"), "baseline")
+    by = {}
+    for r in results:
+        by.setdefault(r["nbhd"], []).append(r["response_s"])
+    ranked = sorted(((statistics.median(v), k, len(v)) for k, v in by.items() if len(v) >= SLOW_MIN_CALLS), reverse=True)
+    picked = [{"nbhd": k, "baseline_train_median_s": round(m), "train_calls": n} for m, k, n in ranked[:SLOW_N]]
+    (DATA / "slow_nbhds.json").write_text(json.dumps({"nbhds": [p["nbhd"] for p in picked], "detail": picked}, indent=1))
+    return picked
+
+
+def summarize(results, version, split, slow=None):
+    slow = set(load_slow() if slow is None else slow)
     r = sorted(x["response_s"] for x in results)
+    sr = [x["response_s"] for x in results if x["nbhd"] in slow]
     return {
         "version": version,
         "split": split,
+        "slow_median_s": statistics.median(sr) if sr else None,
+        "slow_n": len(sr),
         "median_s": statistics.median(r),
+        "mean_s": round(statistics.mean(r), 1),
         "p90_s": r[int(0.9 * (len(r) - 1))],
         "pct_under_8min": sum(x <= 480 for x in r) / len(r),
         "n": len(r),
     }
 
 
+def goal(a, b, slow=None):
+    slow = set(load_slow() if slow is None else slow)
+    s_ci = paired_ci([r for r in a if r["nbhd"] in slow], [r for r in b if r["nbhd"] in slow])
+    all_ci = paired_ci(a, b)
+    return {
+        "slow_nbhds": s_ci,
+        "everyone": all_ci,
+        "passes": s_ci["ci95"][1] < 0 and all_ci["median_diff_s"] <= OVERALL_TOLERANCE_S,
+    }
+
+
 def paired_ci(a, b, n=1000, seed=0):
     by_id = {r["call_id"]: r["response_s"] for r in b}
     pairs = [(r["response_s"], by_id[r["call_id"]]) for r in a if r["call_id"] in by_id]
+    if not pairs:
+        return {"median_diff_s": 0.0, "ci95": [0.0, 0.0], "n": 0}
     rng = random.Random(seed)
     diffs = []
     for _ in range(n):
@@ -634,6 +671,13 @@ def self_check():
     ci = paired_ci(a, b, n=200)
     assert ci["median_diff_s"] == -30 and ci["ci95"][1] < 0, ci
 
+    base = [{"call_id": str(i), "nbhd": "far" if i < 60 else "near", "response_s": 600.0 + i % 50} for i in range(300)]
+    better = [{**r, "response_s": r["response_s"] - 40 if r["nbhd"] == "far" else r["response_s"] + 2} for r in base]
+    worse = [{**r, "response_s": r["response_s"] - 40 if r["nbhd"] == "far" else r["response_s"] + 30} for r in base]
+    assert goal(better, base, ["far"])["passes"] and not goal(worse, base, ["far"])["passes"]
+    sm = summarize(better, "v", "x", ["far"])
+    assert sm["slow_n"] == 60 and sm["slow_median_s"] < summarize(base, "b", "x", ["far"])["slow_median_s"]
+
     roads = Roads()
     src = roads.nearest([37.7793], [-122.4193])
     plain = roads.times(src)
@@ -709,6 +753,7 @@ def main():
     if a.calibrate:
         calibrate(world)
         print(json.dumps(calibration_report(world), indent=1))
+        print(json.dumps(pick_slow(world), indent=1))
         return
     if a.fixtures:
         return write_fixtures(world)
@@ -723,6 +768,7 @@ def main():
             world = World.load(roads=world.roads)
             calibrate(world)
             print(json.dumps(calibration_report(world), indent=1))
+            print(json.dumps(pick_slow(world), indent=1))
         return
     calls = load_calls(a.split)
     if a.worst:
@@ -739,7 +785,7 @@ def main():
     summary["actual_median_s"] = statistics.median(r["historical_s"] for r in results)
     summary["stats"] = stats
     if a.compare:
-        summary["vs_" + Path(a.compare).stem] = paired_ci(results, simulate(world, calls, a.compare)[0])
+        summary["vs_" + Path(a.compare).stem] = goal(results, simulate(world, calls, a.compare)[0])
     if a.out:
         Path(a.out).write_text(json.dumps({"summary": summary, "results": results}))
     print(json.dumps(summary, indent=1))
