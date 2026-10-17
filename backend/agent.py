@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 import subprocess
+from datetime import datetime
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ ROOT = Path(__file__).parents[1]
 BACKEND = ROOT / "backend"
 POLICIES = BACKEND / "policies"
 RUNS = ROOT / "runs"
+FIXTURES = ROOT / "fixtures"
 VERSIONS = RUNS / "versions.jsonl"
 PY = sys.executable
 HEADLINE = RUNS / "headline.json"
@@ -66,6 +68,8 @@ ENGINE_NOTE = """Engine mode: the score is the time until the first paramedic is
 def send_engine(call, engines, eta, ambulance_s) -> str | None
 
 `engines` lists idle paramedic fire engines as {unit_id, post, kind: "engine"}; `eta(engine, call)` is that engine's seconds from dispatch to scene; `ambulance_s` is the chosen ambulance's seconds from dispatch to scene. Return an engine id to send it, or None. Injected globals: `ENGINES` (engine to its station post) and `ENGINE_LOAD` ("E01|15": that engine's own fire and other dispatches per day in that hour). Without send_engine, an engine goes only when history sent one. A sent engine is busy for about 10 minutes on scene, so it can miss its own fire calls: `stats.engine_conflicts` counts real engine calls that start while your policy has that engine busy, and a candidate with more than twice the baseline's conflicts is rejected.
+
+Faster for everyone is the priority in engine mode: the citywide median counts as much as the slow neighborhoods, so look for gains across the whole city, not only the ten slow neighborhoods.
 
 """
 
@@ -212,7 +216,20 @@ def headline():
     out = {"version": best, "frozen": {k: s[k] for k in keys}, "baseline": {k: b[k] for k in keys}, "vs_baseline": s["vs_baseline"]}
     RUNS.mkdir(exist_ok=True)
     HEADLINE.write_text(json.dumps(out, indent=1))
+    if EXTRA:
+        snapshot(best)
     print(json.dumps(out, indent=1))
+
+
+def snapshot(best):
+    for name, version in (("engines_baseline", "baseline"), ("engines_agent", best)):
+        tmp = RUNS / f"{name}.json"
+        sim("--policy", version, "--split", "frozen", "--out", str(tmp))
+        d = json.loads(tmp.read_text())
+        tuesday = [r for r in d["results"] if datetime.fromisoformat(r["t"]).weekday() == 1]
+        (FIXTURES / f"{name}.json").write_text(json.dumps({"version": version, "summary": d["summary"], "results": tuesday}))
+    (FIXTURES / "engines_headline.json").write_text(HEADLINE.read_text())
+    (FIXTURES / "engines_versions.jsonl").write_text(VERSIONS.read_text())
 
 
 def main():
