@@ -351,7 +351,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
         else:
             chosen = min(duty, key=lambda u: busy[u])
             stats["queued"] += 1
-        start = max(busy[chosen], t)
+        start = float(max(busy[chosen], t))
         wait = start - t
         origin = pos(chosen, start)
         arrive[chosen] = 0
@@ -590,6 +590,7 @@ def self_check():
     assert r[0]["unit"] == "B" and r[0]["eta_s"] == 100.0, r[0]
     assert r[1]["unit"] == "A" and r[1]["eta_s"] == 400.0, r[1]
     assert r[2]["wait_s"] > 0 and stats["queued"] == 1, r[2]
+    json.dumps(r)
     assert r[0]["response_s"] == 60 + 10 + 100
 
     w = world_()
