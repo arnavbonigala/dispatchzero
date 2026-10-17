@@ -178,14 +178,14 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] Swap the stub for the real `sim.py`
 - [x] First 3 real iterations, prompt tuned
 - [x] At least one version passes the slow-neighborhood goal on the holdout week
-- [ ] 6 to 10 iterations run, final version frozen
-- [ ] Version chart and diagnosis feed in the UI
+- [x] 6 to 10 iterations run, final version frozen (13 run, v013 frozen: frozen week slow −14s, CI −36 to −5; citywide median +2.7s)
+- [x] Version chart and diagnosis feed in the UI
 - [ ] Pitch with real numbers
 
 ### Checkpoints
 - [x] 1:30 go/no-go: calibration within 10%
 - [x] 2:45: an accepted version passes the goal on the holdout week
-- [ ] 3:45: full loop visible in the UI
+- [x] 3:45: full loop visible in the UI
 - [ ] 4:30: demo runs 3 times cleanly
 - [ ] 5:00: submitted
 
