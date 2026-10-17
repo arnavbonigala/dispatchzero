@@ -22,7 +22,7 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | `backend/contracts.py` | All | Frozen shapes: `Call`, `IdleUnit`, `CallResult`, `Summary`, `Version`, `CameraReading`, policy signatures |
 | `backend/fetch.py` | A | Data download |
-| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--offload-cap MINUTES`, `--self-check`, `--fixtures` |
+| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--offload-cap MINUTES`, `--dispatch-at-entry`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
 | `backend/agent.py` | C | Improvement loop |
 | `backend/api.py` | C | FastAPI |
@@ -106,6 +106,17 @@ A transported patient's ambulance spends a median 43 minutes between arriving at
 | 20 min | −20 s (CI −28 to −15) | −26 s | −34 s | −43 s |
 
 Caveat: `hospital_s` covers the whole hospital stay (offload, paperwork, cleanup), while SF's 20-minute standard (EMSA Policy 4000.1) covers patient offload alone at the 90th percentile. Per-hospital offload data: DataSF `6x9q-izga` (monthly 90th-percentile offload by hospital) and `t4sf-777q` (diversions).
+
+## Dispatch-at-entry what-if
+
+The 148 s median from call received to dispatch splits into received → entry (call-taking, median 98 s) and entry → dispatch (median 37 s). `sim.py --dispatch-at-entry --split holdout` replays the calls with each unit dispatched at entry instead, for example by an AI pre-alert as soon as the call is entered:
+
+| Scenario | Everyone (median) | Average | Slow neighborhoods |
+|---|---|---|---|
+| Dispatch at entry | −62 s (CI −69 to −55) | −90 s | −52 s |
+| Dispatch at entry + 20-min hospital cap | −80 s (CI −89 to −73) | −116 s | −78 s |
+
+Caveat: some entry → dispatch time is real triage or waiting for a free unit, so this is an upper bound on what faster dispatch could save.
 
 ## Agent context
 
