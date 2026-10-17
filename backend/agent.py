@@ -27,7 +27,7 @@ You control two functions in one Python file:
 {contract}
 
 Reply with exactly two sections:
-<diagnosis>At most two short sentences, no caveats: the specific problem you found in the data (name neighborhoods, hours, posts or units) and the change you made.</diagnosis>
+<diagnosis>At most two short sentences, no caveats and no mention of testing: the specific problem you found in the data (name neighborhoods, hours, posts or units) and the change you made.</diagnosis>
 <policy>
 the complete new policy file, plain Python, no markdown fences
 </policy>"""
@@ -44,7 +44,7 @@ Baseline training summary:
 Recent attempts (newest last):
 {history}
 
-Current best policy file:
+{near}Current best policy file:
 <current>
 {code}
 </current>
@@ -99,7 +99,7 @@ def gates(train, best_train, holdout=None):
         return False, f"train: citywide {train['vs_baseline']['everyone']['median_diff_s']:+.0f}s vs baseline"
     if holdout is not None and not holdout["vs_baseline"]["passes"]:
         g = holdout["vs_baseline"]
-        return False, f"holdout: slow {g['slow_nbhds']['median_diff_s']:+.0f}s CI {g['slow_nbhds']['ci95']}, citywide {g['everyone']['median_diff_s']:+.0f}s"
+        return False, f"holdout: slow {g['slow_nbhds']['median_diff_s']:+.0f}s CI [{g['slow_nbhds']['ci95'][0]:.0f}, {g['slow_nbhds']['ci95'][1]:.0f}], citywide {g['everyone']['median_diff_s']:+.0f}s"
     return True, "passed train and holdout"
 
 
@@ -129,11 +129,16 @@ def step(model):
     base_train = evaluate("baseline", "train")
     worst = sim("--policy", best, "--split", "train", "--worst", "50")
     slim = lambda s: {k: s[k] for k in ("slow_median_s", "slow_n", "median_s", "p90_s", "n", "stats") if k in s}
-    recent = [{k: r.get(k) for k in ("version", "parent", "diagnosis", "accepted", "reason")} for r in rows[-5:]]
+    recent = [{**{k: r.get(k) for k in ("version", "parent", "diagnosis", "accepted", "train_slow_median", "train_all_diff")},
+               "reason": "failed the holdout gate" if str(r.get("reason", "")).startswith("holdout") else r.get("reason")} for r in rows[-5:]]
+    near = [r for r in rows if str(r.get("reason", "")).startswith("holdout") and (POLICIES / f"{r['version']}.py").exists()]
+    near = min(near, key=lambda r: r["train_slow_median"], default=None)
+    near = (f"Closest rejected candidate ({near['version']}): it beat the current best on training but failed the holdout gate. "
+            f"Consider a more conservative version of it.\n<near_miss>\n{(POLICIES / (near['version'] + '.py')).read_text()}</near_miss>\n\n") if near else ""
     prompt = PROMPT.format(
         slow=", ".join(json.loads((ROOT / "data" / "slow_nbhds.json").read_text())["nbhds"]),
         best=best, summary=json.dumps(slim(best_train)), base=json.dumps(slim(base_train)),
-        history="\n".join(json.dumps(r) for r in recent), code=(POLICIES / f"{best}.py").read_text(),
+        history="\n".join(json.dumps(r) for r in recent), near=near, code=(POLICIES / f"{best}.py").read_text(),
         worst=json.dumps({k: v for k, v in worst.items() if k != "summary"}))
     name = next_name()
     row = {"version": name, "parent": best, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
@@ -141,7 +146,7 @@ def step(model):
         row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract()), model))
         (POLICIES / f"{name}.py").write_text(code)
         train = evaluate(name, "train")
-        row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"]}
+        row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"]}
         ok, why = gates(train, best_train)
         if ok:
             holdout = evaluate(name, "holdout")
