@@ -12,6 +12,8 @@ uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python backend/sim.py --fit-speeds
 .venv/bin/python backend/sim.py --self-check
 cd frontend && npm install && npm run dev
+.venv/bin/uvicorn --app-dir backend api:app --port 8000
+.venv/bin/python backend/agent.py --iters 4
 ```
 
 `fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph.
@@ -24,8 +26,8 @@ cd frontend && npm install && npm run dev
 | `backend/fetch.py` | A | Data download |
 | `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--offload-cap MINUTES`, `--dispatch-at-entry`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
-| `backend/agent.py` | C | Improvement loop |
-| `backend/api.py` | C | FastAPI |
+| `backend/agent.py` | C | Improvement loop: `--iters N [--model sonnet]`, `--headline` |
+| `backend/api.py` | C | FastAPI: `uvicorn --app-dir backend api:app --port 8000` |
 | `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading` |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + Leaflet |
@@ -123,3 +125,29 @@ Caveat: some entry → dispatch time is real triage or waiting for a free unit, 
 `sim.py --policy NAME --split train --worst 50 --out FILE` returns the 50 calls with the most controllable time (queue wait + drive), each with the closest post, its drive time, which units were based there and whether they were idle, busy or off duty, plus `avoidable_s`, and aggregates: worst calls by neighborhood and bucket, and the top (neighborhood, bucket) cells by total avoidable seconds.
 
 Limits to state honestly: SF publishes no unit locations, so the simulator assumes idle units wait at posts. Per-call simulated drive time correlates only weakly with real drive time (Spearman 0.19, median absolute error about 245s), and the factors also absorb units not being at their post. Present gains as simulator-relative estimates calibrated to SF's real medians, not as predicted real-world seconds.
+
+## Agent loop
+
+`agent.py --iters N` runs N rounds. Each round:
+
+1. Takes the newest accepted version in `runs/versions.jsonl` as the current best (`baseline` on the first run).
+2. Asks Claude through the `claude` CLI (`--model`, default `sonnet`, no tools). The prompt includes the policy contract from this README, the current best's code, its training summary, the `--worst 50` context, the last 5 attempts, and the closest rejected candidate's code. Holdout numbers never go into the prompt; a holdout failure shows up only as "failed the holdout gate".
+3. Writes the reply to `backend/policies/vNNN.py` and scores it with `sim.py` in a subprocess (120 s timeout). A crash, timeout, or `PolicyRejected` rejects the candidate.
+4. Gate 1, train: the slow-neighborhood median must be below the current best's and citywide at most 5 s slower than baseline. Gate 2, holdout: `--compare baseline` must return `passes`.
+5. Appends `{version, parent, diagnosis, train_median, frozen_median, accepted, reason, ...}` to `runs/versions.jsonl`. `frozen_median` is filled only for accepted versions and is never shown to the agent.
+
+`agent.py --headline` scores the newest accepted version once on the frozen week against baseline and writes `runs/headline.json`.
+
+## API
+
+| Route | Returns |
+|---|---|
+| `GET /versions` | `runs/versions.jsonl` as a list, or the fixture |
+| `GET /headline` | `runs/headline.json` |
+| `GET /summary/{version}?split=frozen` | Summary for `baseline` or `vNNN` on `train`, `holdout` or `frozen` |
+| `GET /results/{version}?split=frozen` | Per-call results for the replay |
+| `GET /policy/{version}` | Policy source |
+| `GET /cameras` | `data/camera_readings.json`, or the fixture |
+| `GET /posts`, `/slow`, `/speeds` | `data/` files |
+
+Results are cached in `runs/results/{version}_{split}.json`. Delete that folder after any change to default scoring. The Vite dev server proxies `/api` to port 8000.
