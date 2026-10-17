@@ -160,6 +160,8 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] Units free up at the hospital or scene (transport flags + OSM emergency hospitals), then drive back to post
 - [x] Hospital handoff what-if (`--offload-cap`): a 20-min cap makes everyone about 20 s faster at the median
 - [x] Dispatch-at-entry what-if (`--dispatch-at-entry`): everyone about 62 s faster at the median (upper bound); with the 20-min cap, about 80 s
+- [x] Paramedic engines (`--engines`): score is first paramedic on scene; `reference_engine_load` is everyone 71 s faster and slow neighborhoods 137 s faster on the frozen week
+- [x] Hospital choice by offload time: tested, no gain (about 1 s), dropped
 
 ### B: cameras and UI
 - [x] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
