@@ -25,12 +25,7 @@ const TRAFFIC = {
   osm: 'learned road speeds (no Google key)',
 }
 
-const PRIORITIES = [
-  ['3', 'Priority 3', 'lights and sirens'],
-  ['2', 'Priority 2', 'urgent, no sirens'],
-]
-
-export default function DispatchPanel({ state, onArm, onClose, onReplay, priority, setPriority }) {
+export default function DispatchPanel({ state, onArm, onClose, onReplay }) {
   const { armed, loading, error, result } = state
   return (
     <section className="dispatch" aria-labelledby="dp-title">
@@ -46,13 +41,6 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, priorit
               ? 'Click anywhere in San Francisco to report an incident at the replay’s current time.'
               : 'Report an incident and see which ambulance and engine each dispatcher sends, given where every unit is at that moment.'}
           </p>
-          <div className="dp-prio" role="radiogroup" aria-label="Call priority">
-            {PRIORITIES.map(([p, name, sub]) => (
-              <button key={p} role="radio" aria-checked={priority === p} onClick={() => setPriority(p)}>
-                <b>{name}</b><span>{sub}</span>
-              </button>
-            ))}
-          </div>
           {!armed && <button className="dp-btn" onClick={onArm}>Dispatch an incident</button>}
           {error && <p className="dp-error" role="alert">{error}</p>}
         </>
@@ -63,7 +51,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, priorit
       {result && (
         <>
           <p className="dp-where">
-            <b>{result.incident.nbhd}</b> · Priority {result.incident.priority} · {clock(Number(result.incident.t.slice(11, 13)) * 3600 + Number(result.incident.t.slice(14, 16)) * 60)}
+            <b>{result.incident.nbhd}</b> · {clock(Number(result.incident.t.slice(11, 13)) * 3600 + Number(result.incident.t.slice(14, 16)) * 60)}
           </p>
           <div className="dp-compare">
             <Side title="Baseline" side={result.baseline} />

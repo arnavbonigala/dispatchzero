@@ -77,7 +77,6 @@ const DISPATCH_SPEED = 60 // simulated seconds per real second in the dispatch a
 // Arm, click the map, fetch the decision, then run a clock for the animation
 function useDispatch(day, playback) {
   const [state, setState] = useState({ armed: false, loading: false, error: null, result: null })
-  const [priority, setPriority] = useState('3')
   const [elapsed, setElapsed] = useState(0)
   const [runId, setRunId] = useState(0)
 
@@ -107,7 +106,7 @@ function useDispatch(day, playback) {
     const pad = (n) => String(n).padStart(2, '0')
     const t = `${day}T${pad(Math.floor(s / 3600) % 24)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`
     setState({ armed: false, loading: true, error: null, result: null })
-    dispatchIncident(lat, lon, t, priority)
+    dispatchIncident(lat, lon, t, '2')
       .then((result) => {
         setElapsed(0)
         setState({ armed: false, loading: false, error: null, result })
@@ -119,7 +118,7 @@ function useDispatch(day, playback) {
     setElapsed(0)
     setRunId((n) => n + 1)
   }
-  return { state, elapsed, arm, close, pick, replay, priority, setPriority }
+  return { state, elapsed, arm, close, pick, replay }
 }
 
 const gain = (diff) => mmss(Math.abs(diff))
@@ -191,16 +190,18 @@ function Legend() {
 
 const SOURCES = [
   ['8,607', 'SF 911 ambulance calls over 5 weeks'],
-  ['10,668', 'dispatches by 57 ambulances, with shift patterns'],
-  ['9,998', 'dispatches by 34 paramedic fire engines'],
+  ['10,668', 'dispatches by 57 ambulances'],
+  ['9,998', 'dispatches by 34 paramedic fire engines, with locations'],
   ['62%', 'of calls flagged life-threatening'],
   ['10,033', 'intersections in the road network'],
-  ['', 'Road speeds learned per neighborhood and time of day'],
+  ['5,165', 'real drives train its drive-time model (error 253 s → 197 s)'],
+  ['34,440', 'neighborhood-hour demand predictions from time, weather and demographics'],
+  ['', 'Lookahead: coverage of the next hour\'s expected calls before each dispatch'],
   ['11', 'hospitals with real handoff times'],
   ['33', 'live Caltrans freeway cameras'],
   ['840', 'hours of weather, rain and temperature'],
   ['41', 'neighborhoods with population and share 65+'],
-  ['', 'Demand by hour and area, and each engine\'s hourly workload'],
+  ['', 'Each engine\'s hourly workload, and demand by hour and area'],
 ]
 
 function Sources() {
@@ -273,8 +274,7 @@ export default function App() {
           <Legend />
         </div>
         <aside className="side">
-          <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
-            priority={dispatch.priority} setPriority={dispatch.setPriority} />
+          <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay} />
           <VersionLog />
           <Sources />
         </aside>

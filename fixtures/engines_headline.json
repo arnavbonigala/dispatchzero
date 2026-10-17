@@ -1,35 +1,41 @@
 {
  "version": "e036",
  "frozen": {
-  "slow_median_s": 441.6,
-  "median_s": 470.45,
-  "mean_s": 514.9,
-  "p90_s": 685.4,
+  "slow_median_s": 439.6,
+  "median_s": 469.7,
+  "mean_s": 513.1,
+  "weighted_mean_s": 502.3,
+  "lt_mean_s": 485.0,
+  "nbhd_spread_s": 42.3,
+  "p90_s": 673.9,
   "actual_median_s": 658.0,
   "n": 1708
  },
  "baseline": {
-  "slow_median_s": 587.9,
-  "median_s": 556.7,
-  "mean_s": 606.0,
-  "p90_s": 884.5,
+  "slow_median_s": 600.2,
+  "median_s": 552.0,
+  "mean_s": 596.7,
+  "weighted_mean_s": 567.9,
+  "lt_mean_s": 521.9,
+  "nbhd_spread_s": 78.5,
+  "p90_s": 851.4,
   "actual_median_s": 658.0,
   "n": 1708
  },
  "vs_baseline": {
   "slow_nbhds": {
-   "median_diff_s": -146.29999999999995,
+   "median_diff_s": -160.60000000000002,
    "ci95": [
-    -168.10000000000002,
-    -113.69999999999999
+    -200.00000000000006,
+    -129.59999999999997
    ],
    "n": 287
   },
   "everyone": {
-   "median_diff_s": -86.25000000000006,
+   "median_diff_s": -82.30000000000001,
    "ci95": [
-    -100.55000000000007,
-    -74.70000000000005
+    -96.0,
+    -68.19999999999993
    ],
    "n": 1708
   },
