@@ -49,7 +49,7 @@ function usePolice(day, fixture) {
 // [key, label, swatch]; a swatch starting with 'heat' is a CSS gradient class
 const LAYERS = [
   ['police', 'SFPD calls', C.police],
-  ['chp', 'CHP freeway, live', C.gold],
+  ['live', 'live now: SFPD + CHP', C.gold],
   ['reports', 'police reports, 90 days', 'heat'],
   ['crashes', 'injury crashes since 2021', 'heat crash'],
 ]
@@ -319,8 +319,8 @@ export default function App() {
   const dispatch = useDispatch(day, playback)
   const learning = useLearning(playback)
   const police = usePolice(day, data.policeFixture)
-  const [show, setShow] = useState({ police: true, chp: true, reports: true, crashes: false })
-  const incidents = useMemo(() => ({ police, chp: data.liveIncidents.chp ?? [], crashes: data.crashes.hotspots ?? [],
+  const [show, setShow] = useState({ police: true, live: true, reports: true, crashes: false })
+  const incidents = useMemo(() => ({ police, live: [...(data.liveIncidents.police ?? []), ...(data.liveIncidents.chp ?? [])], crashes: data.crashes.hotspots ?? [],
     reports: data.reports.cells ?? [] }), [police, data.liveIncidents, data.crashes, data.reports])
   const [camera, setCamera] = useState(null)
   const jam = useMemo(() => {

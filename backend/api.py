@@ -103,7 +103,7 @@ def incidents_live():
     import incidents
 
     d = incidents.live()
-    return {"fetched_at": d.get("fetched_at"), "police": d.get("police", []), "chp": d.get("chp", [])}
+    return {"fetched_at": d.get("fetched_at"), "police": d.get("police", []), "chp": d.get("chp", []), "errors": d.get("errors", {})}
 
 
 @app.get("/incidents/police")
@@ -113,11 +113,7 @@ def incidents_police(day: str):
 
     if not re.fullmatch(r"\d{4}-\d\d-\d\d", day):
         raise HTTPException(400, "day must look like 2026-10-06")
-    rows = incidents.frozen_police(day)
-    if not rows:
-        fx = incidents.read_json(FIXTURES / "police_tuesday.json") or {}
-        rows = fx.get("police", []) if fx.get("day") == day else []
-    return rows
+    return incidents.frozen_police(day)
 
 
 @app.get("/incidents/crashes")

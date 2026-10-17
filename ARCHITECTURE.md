@@ -392,13 +392,13 @@ All public, no key. `incidents.py` writes to `data/` and copies a small fixture 
 
 | Map layer | Source | Refresh | What is kept |
 |---|---|---|---|
-| SFPD calls (dots, replay) | DataSF `2zdj-bwza`, closed dispatched calls | `incidents.py --history` | Frozen-week priority A and B calls: type, priority, intersection, neighborhood. Officer-initiated and sensitive calls and all free-text notes are dropped. Shown for 30 replay minutes, fading; weapon or violence calls get a red ring, vehicle crashes are amber |
-| SFPD calls (live) | DataSF `gnap-fj3t`, real-time dispatched calls, about 15 min behind | `incidents.py` or `--loop` | Same filter, last 3 hours |
-| CHP freeway, live | CHP media feed `media.chp.ca.gov/sa_xml/sa.xml`, Golden Gate center, inside SF | `incidents.py` or `--loop` | Type, location, route, a guessed slowdown by type |
-| Police reports, 90 days (heat) | DataSF `wg3w-h783`, SFPD incident reports, about a day behind | `incidents.py --reports` | Initial reports with a location, last 90 days, counted per 150 m cell (cells with 2+), with violent count and top category. Paperwork categories (lost property, warrants, case closures) are left out. Heat is weighted by the square root of the count so downtown doesn't wash out the city; hover a cell for its numbers |
+| SFPD calls (dots, replay) | DataSF `2zdj-bwza`, closed dispatched calls | `incidents.py --history` | Frozen-week priority A and B calls: type, priority, intersection, neighborhood. Officer-initiated and sensitive calls and all free-text notes are dropped. Shown for 45 replay minutes, fading (the warning window); weapon or violence calls get a red ring, vehicle crashes are amber |
+| Live now: SFPD (light ring) | DataSF `gnap-fj3t`, real-time dispatched calls, about 15 min behind | `incidents.py` or `--loop` | Same filter, last 3 hours |
+| Live now: CHP (gold) | CHP media feed `media.chp.ca.gov/sa_xml/sa.xml`, Golden Gate center, inside SF | `incidents.py` or `--loop` | Type, location, route; collisions and closures count as crashes |
+| Police reports, 90 days (heat) | DataSF `wg3w-h783`, SFPD incident reports, about a day behind | `incidents.py --reports` | Initial reports with a location, last 90 days, counted per 150 m cell (cells with 2+), with violent count and top category. Paperwork categories (lost property, warrants, case closures) are left out. Heat is weighted by the square root of the count so downtown doesn't wash out the city; zoom in to 13+ and hover a cell for its numbers |
 | Injury crashes since 2021 (heat) | DataSF `ubvf-ztfx`, traffic crashes resulting in injury, about 7 weeks behind | `incidents.py --crashes` | Counted per 220 m cell (cells with 3+), with severe and fatal counts |
 
-Live dispatch returns `warnings`: frozen-week police calls within 500 m in the 45 minutes before the moment, and live CHP incidents within 1.5 km, weapon or violence calls first. The panel lists them under Nearby and the map rings them. They inform the crew only; they do not change which unit is sent.
+Live dispatch returns `warnings`: frozen-week police calls within 500 m in the 45 minutes before the moment (across midnight), and today's live CHP incidents within 1.5 km (labelled as today, not the replay day), weapon or violence calls first. The panel lists them under Nearby and the map rings them. They inform the crew only; they do not change which unit is sent.
 
 ## API
 

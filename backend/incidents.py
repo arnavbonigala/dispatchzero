@@ -47,7 +47,6 @@ SF_BOX = (37.70, 37.84, -122.53, -122.35)
 LIVE_HOURS = 3
 POLL_S = 120
 LIVE_MAX_AGE_S = 15 * 60  # an incidents.json older than this is ignored by dispatch
-CHP_MAX_AGE_S = 90 * 60  # CHP incidents older than this no longer slow roads
 NEAR_M = 500
 NEAR_MIN = 45
 CHP_NEAR_M = 1500
@@ -66,8 +65,8 @@ VIOLENT = {"Assault", "Robbery", "Homicide", "Weapons Offense", "Weapons Carryin
 # SFPD call types with a weapon or violence, where a crew may need police on scene first ("Fight No Weapon" is not one)
 SAFETY = re.compile(r"SHOOT|SHOTS|SHOT SPOTTER|STAB|GUN|KNIFE|W/WEAPON|ADW|HOSTAGE|BARRICADE|EXPLOSI", re.I)
 CRASH = re.compile(r"VEH ACCIDENT|HIT AND RUN|HIT & RUN|COLLISION", re.I)
-# CHP incident type -> how much slower that freeway stretch is treated in live dispatch
-CHP_SLOWDOWN = [(re.compile(r"1144|FATAL|1180|MAJOR INJ|CLOSURE|SIG ALERT", re.I), 3.0),
+# CHP incident type -> severity; 2 and up counts as a crash on the map
+CHP_SEVERITY = [(re.compile(r"1144|FATAL|1180|MAJOR INJ|CLOSURE|SIG ALERT", re.I), 3.0),
                 (re.compile(r"COLLISION|HIT AND RUN|11[78]\d", re.I), 2.0),
                 (re.compile(r"HAZARD|1125|1013|1166", re.I), 1.3)]
 ROUTE = re.compile(r"\b(I|US|SR|HWY)[- ]?(\d{1,3})\b", re.I)
@@ -125,15 +124,15 @@ def police_where(start, end):
 def fetch_police(url, start, end):
     rows, offset = [], 0
     while True:
-        batch = get(url, {"$where": police_where(start, end), "$order": "received_datetime", "$limit": 50000, "$offset": offset}).json()
+        batch = get(url, {"$where": police_where(start, end), "$order": "received_datetime,cad_number", "$limit": 50000, "$offset": offset}).json()
         rows += batch
         if len(batch) < 50000:
             return police_rows(rows)
         offset += 50000
 
 
-def chp_slowdown(kind):
-    return next((f for pat, f in CHP_SLOWDOWN if pat.search(kind)), 1.0)
+def chp_severity(kind):
+    return next((f for pat, f in CHP_SEVERITY if pat.search(kind)), 1.0)
 
 
 def chp_route(location):
@@ -164,7 +163,7 @@ def parse_chp(xml, center=CHP_CENTER):
         kind = f["LogType"].split("-", 1)[-1].strip() if "-" in f["LogType"] else f["LogType"]
         out.append({"id": f"chp-{lid}", "source": "chp", "t": t.isoformat(timespec="seconds"), "lat": round(lat, 6), "lon": round(lon, 6),
                     "title": kind, "place": " ".join(f["Location"].split()), "route": chp_route(f["Location"]),
-                    "slowdown": chp_slowdown(f["LogType"]), "safety": False, "crash": chp_slowdown(f["LogType"]) >= 2.0})
+                    "safety": False, "crash": chp_severity(f["LogType"]) >= 2.0})
     return sorted(out, key=lambda x: x["t"])
 
 
@@ -223,8 +222,15 @@ def hotspots(rows, min_n=MIN_CRASHES):
 
 
 def fetch_crashes():
-    rows = get(CRASHES, {"$select": "collision_datetime,collision_severity,tb_latitude,tb_longitude",
-                         "$where": f"collision_datetime >= '{SINCE}'", "$limit": 100000}, timeout=120).json()
+    rows, offset = [], 0
+    while True:
+        batch = get(CRASHES, {"$select": "collision_datetime,collision_severity,tb_latitude,tb_longitude",
+                              "$where": f"collision_datetime >= '{SINCE}'", "$order": "collision_datetime,unique_id",
+                              "$limit": 50000, "$offset": offset}, timeout=120).json()
+        rows += batch
+        if len(batch) < 50000:
+            break
+        offset += 50000
     last = max((str(r.get("collision_datetime", ""))[:10] for r in rows), default="")
     out = {"from": SINCE, "to": last, "crashes": len(rows), "cell_m": 220, "hotspots": hotspots(rows)}
     write_json(HOTSPOTS, out)
@@ -261,7 +267,7 @@ def fetch_reports(days=REPORT_DAYS):
     rows, offset = [], 0
     while True:
         batch = get(INCIDENT_REPORTS, {"$select": "incident_datetime,incident_category,latitude,longitude", "$where": where,
-                                       "$order": "incident_datetime", "$limit": 50000, "$offset": offset}, timeout=120).json()
+                                       "$order": "incident_datetime,row_id", "$limit": 50000, "$offset": offset}, timeout=120).json()
         rows += batch
         if len(batch) < 50000:
             break
@@ -296,24 +302,14 @@ def live(max_age_s=LIVE_MAX_AGE_S):
     return {}
 
 
-def chp_readings(max_age_s=CHP_MAX_AGE_S):
-    """Recent CHP freeway incidents in the shape of a camera reading, so the same road-slowdown code applies."""
-    now = now_sf()
-    out = []
-    for c in live().get("chp", []):
-        try:
-            age = (now - datetime.fromisoformat(c["t"])).total_seconds()
-        except (KeyError, TypeError, ValueError):
-            continue
-        if c.get("route") and float(c.get("slowdown", 1.0)) > 1.0 and -600 <= age <= max_age_s:
-            out.append({"camera_id": c["id"], "name": f"CHP: {c['title']} at {c['place']}", "route": c["route"], "lat": c["lat"],
-                        "lon": c["lon"], "slowdown": float(c["slowdown"]), "ts": c["t"], "kind": "chp"})
-    return out
-
-
 def frozen_police(day=None):
+    """Frozen-week SFPD calls (on one day if given). Without data/police_frozen.json, the Tuesday fixture for its day."""
     d = read_json(FROZEN)
-    rows = d.get("police", []) if isinstance(d, dict) else []
+    if isinstance(d, dict):
+        rows = d.get("police", [])
+    else:
+        fx = read_json(FIXTURES / "police_tuesday.json") or {}
+        rows = fx.get("police", []) if not day or fx.get("day") == day else []
     return [r for r in rows if r["t"].startswith(day)] if day else rows
 
 
@@ -326,7 +322,8 @@ def nearby(lat, lon, t, limit=5):
     500 m, and live CHP incidents within 1.5 km. Scene-safety calls first, then nearest."""
     when = datetime.fromisoformat(t)
     out = []
-    for r in frozen_police(t[:10]):
+    days = {t[:10], (when - timedelta(minutes=NEAR_MIN)).date().isoformat()}
+    for r in (r for d in sorted(days) for r in frozen_police(d)):
         mins = (when - datetime.fromisoformat(r["t"])).total_seconds() / 60
         d = meters(lat, lon, r["lat"], r["lon"])
         if 0 <= mins <= NEAR_MIN and d <= NEAR_M:

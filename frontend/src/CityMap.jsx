@@ -10,7 +10,8 @@ import { C, clock, mmss, responseColor, rgb, secOfDay, slowdownColor } from './f
 const STYLE = 'https://tiles.openfreemap.org/styles/dark'
 const RECENT_S = 3600
 const GROW_S = 240
-const POLICE_S = 1800 // SFPD calls stay on the map for 30 replay minutes, fading
+const POLICE_S = 2700 // SFPD calls stay on the map for 45 replay minutes, fading: the same window as dispatch warnings
+const HOVER_ZOOM = 13 // heat cells answer hover only from here in, so neighborhood names still show when zoomed out
 const narrow = () => typeof window !== 'undefined' && window.innerWidth < 900
 const VIEW = { longitude: -122.447, latitude: 37.757, zoom: narrow() ? 11 : 11.7, pitch: 0, bearing: 0 }
 const TILT = { pitch: 55, bearing: -17 }
@@ -109,9 +110,9 @@ function tooltip({ layer, object }) {
   else if (id === 'reports') text = `${object.n} police reports in 90 days · mostly ${object.top}\n${object.violent} violent (assault, robbery, weapons…)`
   else if (id === 'police' || id === 'd-warn') {
     const src = object.source === 'chp' ? 'CHP' : 'SFPD'
-    const when = object.live ? 'live now' : object.source === 'chp' ? `live · ${object.t.slice(11, 16)}` : clock(secOfDay(object.t))
+    const when = object.live ? 'live today' : object.source === 'chp' ? `live · ${object.t.slice(11, 16)}` : clock(secOfDay(object.t))
     text = `${object.safety ? 'Weapon or violence · ' : ''}${src} · ${object.title}${object.priority ? ` (priority ${object.priority})` : ''}\n${object.place} · ${when}`
-  } else if (id === 'chp') text = `CHP live · ${object.title}\n${object.place} · ${object.t.slice(11, 16)}`
+  } else if (id === 'live') text = `${object.source === 'chp' ? 'CHP' : 'SFPD'} live today · ${object.title}\n${object.place} · ${object.t.slice(11, 16)}`
   return text && { text, style }
 }
 
@@ -128,9 +129,13 @@ export default function CityMap({ calls, now, race, posts, neighborhoods, slowNb
   const hospital = result?.hospital
   const toHospital = gm && hospital ? Math.max(0, elapsed - gm.chosen.eta_s) : 0
   const incident = result && [result.incident.lon, result.incident.lat]
+  const policeRows = useMemo(() => incidents.police.map((p) => ({ ...p, s: secOfDay(p.t) })), [incidents.police])
+  const minute = Math.floor(now / 60)
   const police = useMemo(() => (show.police
-    ? incidents.police.map((p) => ({ ...p, s: secOfDay(p.t) })).filter((p) => p.s <= now && p.s > now - POLICE_S)
-    : []), [incidents.police, show.police, now])
+    ? policeRows.filter((p) => p.s <= minute * 60 && p.s > minute * 60 - POLICE_S)
+    : []), [policeRows, show.police, minute])
+  const [zoom, setZoom] = useState(VIEW.zoom)
+  const hover = zoom >= HOVER_ZOOM
   const warnings = result?.warnings ?? []
 
   const layers = [
@@ -151,11 +156,11 @@ export default function CityMap({ calls, now, race, posts, neighborhoods, slowNb
       getWeight: (h) => Math.sqrt(h.n), radiusPixels: 32, intensity: 1, threshold: 0.03, colorRange: MAGENTA, opacity: 0.75,
     }),
     new ScatterplotLayer({
-      id: 'reports', data: show.reports ? incidents.reports : [], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 50],
+      id: 'reports', data: show.reports && hover ? incidents.reports : [], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 50],
       radiusUnits: 'meters', getPosition: (c) => [c.lon, c.lat], getRadius: 75, getFillColor: HIT,
     }),
     new ScatterplotLayer({
-      id: 'crashes', data: show.crashes ? incidents.crashes : [], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 50],
+      id: 'crashes', data: show.crashes && hover ? incidents.crashes : [], pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 50],
       radiusUnits: 'meters', getPosition: (h) => [h.lon, h.lat], getRadius: 110, getFillColor: HIT,
     }),
     new ColumnLayer({
@@ -199,14 +204,15 @@ export default function CityMap({ calls, now, race, posts, neighborhoods, slowNb
     new ScatterplotLayer({
       id: 'police', data: police, pickable: true, stroked: true, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
       getPosition: (p) => [p.lon, p.lat], getRadius: (p) => (p.safety ? 6 : 4),
-      getFillColor: (p) => rgb(p.crash ? C.warn : C.police, Math.round(70 + 170 * (1 - (now - p.s) / POLICE_S))),
+      getFillColor: (p) => rgb(p.crash ? C.warn : C.police, Math.round(70 + 170 * (1 - (minute * 60 - p.s) / POLICE_S))),
       getLineColor: (p) => (p.safety ? rgb(C.bad) : [15, 23, 42, 200]), getLineWidth: (p) => (p.safety ? 2 : 1),
-      updateTriggers: { getFillColor: [Math.floor(now / 60)] },
+      updateTriggers: { getFillColor: [minute] },
     }),
     new ScatterplotLayer({
-      id: 'chp', data: show.chp ? incidents.chp : [], pickable: true, stroked: true, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
-      getPosition: (c) => [c.lon, c.lat], getRadius: (c) => (c.crash ? 8 : 6), getFillColor: rgb(C.gold),
-      getLineColor: [15, 23, 42, 255], getLineWidth: 2,
+      id: 'live', data: show.live ? incidents.live : [], pickable: true, stroked: true, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
+      getPosition: (c) => [c.lon, c.lat], getRadius: (c) => (c.crash ? 8 : 6), getFillColor: (c) => rgb(c.source === 'chp' ? C.gold : C.police),
+      // a light ring tells today's SFPD calls apart from the replay day's
+      getLineColor: (c) => (c.source === 'chp' ? [15, 23, 42, 255] : rgb(C.ink, 230)), getLineWidth: 2,
     }),
     new ScatterplotLayer({
       id: 'd-warn', data: warnings, pickable: true, stroked: true, filled: false, radiusUnits: 'pixels', lineWidthUnits: 'pixels',
@@ -276,7 +282,8 @@ export default function CityMap({ calls, now, race, posts, neighborhoods, slowNb
 
   return (
     <div className={`city ${armed ? 'armed' : ''}`}>
-      <Map ref={mapRef} pixelRatio={DPR} initialViewState={VIEW} mapStyle={STYLE} onLoad={addBuildings} onStyleData={addBuildings} maxPitch={70}
+      <Map ref={mapRef} pixelRatio={DPR} initialViewState={VIEW} mapStyle={STYLE} onLoad={addBuildings} onStyleData={addBuildings}
+        onZoomEnd={(e) => setZoom(e.viewState.zoom)} maxPitch={70}
         cooperativeGestures={narrow()} attributionControl={{ compact: true }} style={{ position: 'absolute', inset: 0 }}>
         <Overlay layers={layers} getTooltip={tooltip} onClick={click} />
         <NavigationControl position="top-right" visualizePitch />

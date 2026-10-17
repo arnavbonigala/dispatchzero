@@ -35,14 +35,6 @@ const TRAFFIC = {
   cameras: 'Caltrans freeway cameras',
   osm: 'learned road speeds (no Google key)',
 }
-const SOURCE = { cameras: 'Caltrans freeway cameras', chp: 'CHP incidents' }
-
-function trafficLabel(r) {
-  if (r.traffic !== 'cameras') return TRAFFIC[r.traffic] ?? TRAFFIC.osm
-  const names = (r.traffic_sources ?? ['cameras']).map((s) => SOURCE[s]).filter(Boolean)
-  return `${names.join(' + ')}${r.cameras_ts ? ` (readings ${r.cameras_ts.slice(11, 16)})` : ''}`
-}
-
 function Warnings({ items }) {
   if (!items?.length) return null
   return (
@@ -52,7 +44,7 @@ function Warnings({ items }) {
         {items.map((w) => (
           <li key={w.id} className={w.safety ? 'safety' : w.source}>
             <b>{w.safety && 'Weapon or violence: '}{w.source === 'chp' ? 'CHP' : 'Police'} · {w.title}</b>
-            <span>{w.place} · {w.distance_m} m away · {w.live ? 'live now' : `${w.minutes_before} min earlier`}</span>
+            <span>{w.place} · {w.distance_m} m away · {w.live ? 'live today, not the replay day' : `${w.minutes_before} min earlier`}</span>
           </li>
         ))}
       </ul>
@@ -109,7 +101,8 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch
             </div>
           </div>
           <p className="dp-foot">
-            Traffic: {trafficLabel(result)} ·{' '}
+            Traffic: {TRAFFIC[result.traffic] ?? TRAFFIC.osm}
+            {result.traffic === 'cameras' && result.cameras_ts && ` (readings ${result.cameras_ts.slice(11, 16)})`} ·{' '}
             <button className="dp-link" onClick={onReplay}>Replay</button>
           </p>
         </>
