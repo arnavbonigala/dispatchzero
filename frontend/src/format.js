@@ -1,18 +1,23 @@
 export const TARGET_S = 8 * 60
 
-// Map colors live here, not in CSS: Leaflet writes them into SVG attributes where var() is not reliable
 export const C = {
-  good: '#1a9e6f',
-  warn: '#e09b1b',
-  bad: '#d6453d',
-  slow: '#6d4fd8',
-  unit: '#1f5fd1',
-  engine: '#0e7490',
-  hospital: '#b4236b',
-  post: '#55606e',
-  line: '#9aa3ad',
-  ink: '#1c2430',
-  surface: '#ffffff',
+  good: '#6cc08b',
+  warn: '#d9a54a',
+  bad: '#e0604f',
+  slow: '#9d93d6',
+  unit: '#7aa7e8',
+  engine: '#e08a5a',
+  hospital: '#d97fa6',
+  post: '#8b9098',
+  line: '#8b9098',
+  ink: '#ecebe7',
+  surface: '#16191e',
+  gold: '#e3b04b',
+}
+
+export function rgb(hex, a = 255) {
+  const n = parseInt(hex.slice(1), 16)
+  return [n >> 16, (n >> 8) & 255, n & 255, a]
 }
 
 // "2026-10-06T00:04:17" -> seconds since midnight, read from the string so the browser time zone never shifts it
