@@ -68,6 +68,7 @@ class CameraReading(TypedDict):
     name: str
     lat: float
     lon: float
+    route: str
     ts: str
     vehicles: int
     moving_frac: float
