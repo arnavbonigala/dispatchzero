@@ -116,6 +116,7 @@ def main():
     for v in ("baseline", best):
         run("sim.py", "--policy", v, "--split", "frozen", "--engines", "--out", str(RUNS / "results" / f"{v}_frozen_engines.json"))
     run("charts.py")
+    run("live_state.py")
     report["published"] = True
     (FIXTURES / "learned.json").write_text(json.dumps({"last_learned": today, "window": report["window_after"], "best": report["best_after"], "rounds": a.rounds}, indent=1))
     return finish(report, 0)
