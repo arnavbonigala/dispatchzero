@@ -479,6 +479,8 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
                 "ambulance_s": round(response, 1),
                 "engine_unit": sent,
                 "engine_s": None if engine_resp is None else round(engine_resp, 1),
+                "engine_post": world.engines[sent] if sent else None,
+                "engine_eta_s": round(ed, 1) if sent else None,
                 "historical_first_s": min(c["historical_s"], hist_e) if hist_e == hist_e and hist_e is not None else c["historical_s"],
             }
             if trace:
