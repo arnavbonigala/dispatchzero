@@ -132,6 +132,33 @@ function Legend() {
   )
 }
 
+const SOURCES = [
+  ['8,607', 'SF 911 ambulance calls over 5 weeks'],
+  ['10,668', 'dispatches by 57 ambulances, with shift patterns'],
+  ['9,998', 'dispatches by 34 paramedic fire engines'],
+  ['62%', 'of calls flagged life-threatening'],
+  ['10,033', 'intersections in the road network'],
+  ['', 'Road speeds learned per neighborhood and time of day'],
+  ['11', 'hospitals with real handoff times'],
+  ['33', 'live Caltrans freeway cameras'],
+  ['840', 'hours of weather, rain and temperature'],
+  ['41', 'neighborhoods with population and share 65+'],
+  ['', 'Demand by hour and area, and each engine\'s hourly workload'],
+]
+
+function Sources() {
+  return (
+    <section className="sources" aria-labelledby="sources-title">
+      <h2 id="sources-title">Data it learns from</h2>
+      <ul>
+        {SOURCES.map(([n, label]) => (
+          <li key={label}>{n && <b>{n}</b>} {label}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 function ViewToggle({ view, setView, agent }) {
   return (
     <div className="toggle" role="group" aria-label="Dispatcher shown on the map">
@@ -181,6 +208,7 @@ export default function App() {
         </div>
         <aside className="side">
           <VersionLog />
+          <Sources />
         </aside>
       </main>
       <Timeline {...playback} day={day} days={days} setDay={setDay} />
