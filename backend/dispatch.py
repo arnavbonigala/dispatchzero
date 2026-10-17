@@ -344,21 +344,21 @@ def explain(base, agent, hour):
     mins = lambda s: f"{round(s / 60)} min"
     if ae and not be and fa["kind"] == "engine":
         return (f"SF usually sends no fire engine on a call like this, so baseline's first paramedic is ambulance {fb['unit_id']} "
-                f"in {mins(fb['eta_s'])}. Golden Minute sees the closest ambulance is far and adds engine {ae['unit_id']}, "
+                f"in {mins(fb['eta_s'])}. DispatchZero sees the closest ambulance is far and adds engine {ae['unit_id']}, "
                 f"{round(fb['eta_s'] - fa['eta_s'])} s sooner ({mins(fa['eta_s'])}).")
     if be and (not ae or ae["unit_id"] != be["unit_id"]) and be["unit_id"] in (agent.get("engine_idle_ids") or []):
         load = world().engine_load.get(f"{be['unit_id']}|{hour}", 0.0)
         instead = f"sends engine {ae['unit_id']} instead" if ae else "sends no engine"
-        return (f"Golden Minute keeps engine {be['unit_id']} free for fires (it averages {load:.1f} runs at {hour}:00) and {instead}. "
+        return (f"DispatchZero keeps engine {be['unit_id']} free for fires (it averages {load:.1f} runs at {hour}:00) and {instead}. "
                 f"First paramedic: {fa['kind']} {fa['unit_id']} in {mins(fa['eta_s'])}, vs {fb['kind']} {fb['unit_id']} in {mins(fb['eta_s'])} under baseline.")
     if be and ae and ae["unit_id"] != be["unit_id"] and agent.get("engine_idle_ids") is not None:
         gain = fb["eta_s"] - fa["eta_s"]
-        return (f"Under Golden Minute, engine {be['unit_id']} is already out on an earlier call (earlier dispatches went differently), "
+        return (f"Under DispatchZero, engine {be['unit_id']} is already out on an earlier call (earlier dispatches went differently), "
                 f"so {ae['unit_id']} goes and the first paramedic arrives {round(abs(gain))} s {'sooner' if gain > 0 else 'later'} "
                 f"({mins(fa['eta_s'])} vs {mins(fb['eta_s'])} under baseline).")
     gain = fb["eta_s"] - fa["eta_s"]
     if fa["unit_id"] != fb["unit_id"] and abs(gain) >= 5:
-        return (f"First paramedic {round(abs(gain))} s {'sooner' if gain > 0 else 'later'} with Golden Minute: {fa['kind']} {fa['unit_id']} "
+        return (f"First paramedic {round(abs(gain))} s {'sooner' if gain > 0 else 'later'} with DispatchZero: {fa['kind']} {fa['unit_id']} "
                 f"in {mins(fa['eta_s'])}, vs {fb['kind']} {fb['unit_id']} in {mins(fb['eta_s'])} under baseline.")
     gain = b["eta_s"] - a["eta_s"]
     if b["unit_id"] == a["unit_id"] or abs(gain) < 5:
@@ -366,11 +366,11 @@ def explain(base, agent, hour):
         return f"Both send the same units: {first}ambulance {a['unit_id']} in {mins(a['eta_s'])}."
     where = f"post {a['post']} (station area {a['station_area']})"
     if a["moved"]:
-        why = f"Golden Minute had moved {a['unit_id']} to {where} ahead of time"
+        why = f"DispatchZero had moved {a['unit_id']} to {where} ahead of time"
     elif a["unit_id"] not in base["idle_ids"]:
-        why = f"{a['unit_id']} at {where} is still free, because earlier calls played out differently under Golden Minute's positioning; under baseline it is already out on a call"
+        why = f"{a['unit_id']} at {where} is still free, because earlier calls played out differently under DispatchZero's positioning; under baseline it is already out on a call"
     else:
-        why = f"Golden Minute sends {a['unit_id']} from {where}"
+        why = f"DispatchZero sends {a['unit_id']} from {where}"
     lead = f"{round(abs(gain))} s faster" if gain > 0 else f"{round(-gain)} s slower"
     return f"Agent arrives {lead}: {why}. Baseline's closest idle unit is {b['unit_id']} at post {b['post']}."
 

@@ -56,7 +56,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch
           {children}
           <div className="dp-compare">
             <Side title="Baseline" side={result.baseline} />
-            <Side title="Golden Minute" side={result.agent} gm />
+            <Side title="DispatchZero" side={result.agent} gm />
           </div>
           {result.reason && <p className="dp-reason">{result.reason}</p>}
           {result.traffic_reason && (
