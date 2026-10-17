@@ -1,4 +1,4 @@
-# Golden Minute: build plan (2 people, 5 hours)
+# Golden Minute: build plan (3 people, 5 hours)
 
 ## Context
 
@@ -104,16 +104,22 @@ def choose_unit(call: dict, idle: list[dict], eta) -> str              # eta(uni
 
 ## Timeline
 
-Person **A** owns data, simulator and agent. Person **B** owns cameras, API and UI. Each runs Claude Code agents in parallel on sub-pieces.
+| Person | Owns |
+|---|---|
+| **A** | Data and simulator: `fetch.py`, `sim.py`, calibration, `edge_slowdowns()` hook |
+| **B** | Cameras and UI: `cameras.py`, rush-hour clips, React map, camera overlay |
+| **C** | Agent and API: `agent.py`, prompts, `versions.jsonl`, `api.py`, version chart, diagnosis feed, pitch |
 
-| Time | A | B | Checkpoint |
-|---|---|---|---|
-| 0:00–0:20 | Together: freeze the contracts above, set up the repo skeleton, `fetch.py` starts downloading | | Contracts committed |
-| 0:20–1:30 | `fetch.py` done; `sim.py` with the baseline policy; calibration | `cameras.py` reads 1 Caltrans HLS stream → YOLO counts; FastAPI skeleton serving fixture JSON | **1:30 go/no-go:** the baseline sim median is within 10% of actual. Otherwise switch to straight-line distance × factor and continue. |
-| 1:30–2:45 | `agent.py` loop; first 3 iterations | React map + replay from fixture data; camera markers | At least one accepted version that beats baseline on the frozen week |
-| 2:45–3:45 | 6–10 iterations running in the background; `edge_slowdowns()` wired into sim; with/without-jam test | Wire to the real API; version chart and diagnosis feed; record rush-hour clips | Full loop visible in the UI |
-| 3:45–4:30 | Freeze the policy version. Rehearse together: lock numbers, fix the flakiest piece, cut whatever isn't working (cameras first) | | Demo runs 3 times cleanly |
-| 4:30–5:00 | Record a backup video, finalize the pitch, write the README | | Submitted |
+Each person runs Claude Code agents in parallel on sub-pieces. C starts before the simulator exists by coding against a stub `replay()` that returns the summary contract with fake numbers.
+
+| Time | A | B | C | Checkpoint |
+|---|---|---|---|---|
+| 0:00–0:20 | Together: freeze the contracts, repo skeleton, `fetch.py` starts downloading | | | Contracts committed |
+| 0:20–1:30 | `fetch.py` done; `sim.py` with baseline policy; calibration | `cameras.py` reads 1 Caltrans HLS stream → YOLO counts and `moving_frac` | `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`; FastAPI serving fixture JSON | **1:30 go/no-go:** baseline sim median within 10% of actual, otherwise switch to straight-line × factor |
+| 1:30–2:45 | Sim speed-up (cached post Dijkstras), `--self-check`, worst-50 context for the agent | 10 cameras live, slowdown formula, React map + replay from fixtures, camera markers | Swap stub for real `sim.py`; first 3 real iterations; tune the prompt on real diagnoses | At least one accepted version beats baseline on the frozen week |
+| 2:45–3:45 | Wire `edge_slowdowns()` into sim; with/without-jam test | Record rush-hour jam clips + replay mode; wire UI to real API; "dispatch now" panel | 6–10 iterations in the background; version chart + diagnosis feed; draft pitch with real numbers | Full loop visible in the UI |
+| 3:45–4:30 | Freeze the policy version. Rehearse together, fix the flakiest piece, cut whatever isn't working (cameras first) | | | Demo runs 3 times cleanly |
+| 4:30–5:00 | README | Backup video | Final pitch | Submitted |
 
 ## Demo script (3 minutes)
 
