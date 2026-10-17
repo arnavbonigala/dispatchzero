@@ -5,6 +5,7 @@ import './CallFlow.css'
 const WALK_SPEED = 120
 const HOLD_S = 240
 const INTRO_MS = 450
+const RECENT_S = 1800
 
 const clamp = (x) => Math.max(0, Math.min(1, x))
 
@@ -45,11 +46,11 @@ function dispatchStages(r) {
   ].filter(Boolean).sort((a, b) => a.at - b.at)
 }
 
-function useWalk(calls, now) {
+function useWalk(calls, now, playing) {
   const [call, setCall] = useState(null)
   const [t, setT] = useState(0)
-  const live = useRef({ calls, now })
-  live.current = { calls, now }
+  const live = useRef({ calls, now, playing })
+  live.current = { calls, now, playing }
 
   useEffect(() => {
     let raf
@@ -57,8 +58,9 @@ function useWalk(calls, now) {
     let cur = null
     let rel = 0
     const pick = () => {
-      const { calls: cs, now: n } = live.current
-      const started = cs.filter((c) => c.start <= n)
+      const { calls: cs, now: n, playing: on } = live.current
+      if (!on) return
+      const started = cs.filter((c) => c.start <= n && c.start > n - RECENT_S)
       const next = started.filter((c) => !cur || c.start > cur.start).at(-1) ?? cur
       if (next && next !== cur) {
         cur = next
@@ -125,8 +127,8 @@ function Flow({ title, stages, t, revealed = Infinity }) {
   )
 }
 
-export default function CallFlow({ calls, now, result, elapsed }) {
-  const walk = useWalk(calls, now)
+export default function CallFlow({ calls, now, playing, result, elapsed }) {
+  const walk = useWalk(calls, now, playing)
   const intro = useIntro(result)
   const live = result?.agent && !result.agent.error
 

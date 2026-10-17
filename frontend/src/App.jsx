@@ -313,7 +313,7 @@ export default function App() {
           onWatch={jam && (() => setCamera(data.cameras.find((c) => c.camera_id === jam.camera_id)))}>
           <CallFlow calls={[]} now={0} result={dispatch.state.result} elapsed={dispatch.elapsed} />
         </DispatchPanel>
-        <CallFlow calls={dispatching ? [] : calls} now={playback.now} result={null} elapsed={0} />
+        <CallFlow calls={dispatching ? [] : calls} now={playback.now} playing={playback.playing} result={null} elapsed={0} />
         <VersionLog />
         <Sources />
       </aside>
