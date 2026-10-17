@@ -41,7 +41,7 @@ CAMERA_RADIUS_M = 600
 SLOW_N = 10
 SLOW_MIN_CALLS = 50
 OVERALL_TOLERANCE_S = 5.0
-PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
+PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority", "life_threatening")
 ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
 BANNED_ATTRS = {"gi_frame", "gi_code", "gi_yieldfrom", "cr_frame", "cr_code", "cr_await", "ag_frame", "ag_code", "f_globals", "f_locals",
                 "f_builtins", "f_back", "f_code", "tb_frame", "tb_next", "co_consts", "mro", "format", "format_map"}
@@ -412,6 +412,8 @@ def load_policy(policy, world):
     mod.BUCKET_OF = dict(BUCKET_OF)
     mod.ENGINES = dict(world.engines)
     mod.ENGINE_LOAD = dict(world.engine_load)
+    mod.WEATHER = {k: dict(v) for k, v in world.weather.items()}
+    mod.NBHD = {k: dict(v) for k, v in world.nbhd_info.items()}
     random.seed(POLICY_SEED)
     spec.loader.exec_module(mod)
     return mod
@@ -436,6 +438,8 @@ class World:
         self.engine_offsets = {b: 0.0 for b in BUCKETS}
         self.engine_on_scene = 0.0
         self.engine_load = {}
+        self.weather = {}
+        self.nbhd_info = {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -461,6 +465,9 @@ class World:
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
+        for attr, name in (("weather", "weather.json"), ("nbhd_info", "neighborhoods.json")):
+            if (DATA / name).exists():
+                setattr(world, attr, json.loads((DATA / name).read_text()))
         if (DATA / "engines.json").exists():
             ej = json.loads((DATA / "engines.json").read_text())
             world.engines = {e["unit_id"]: e["post"] for e in ej["engines"]}
@@ -687,8 +694,12 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
                 "ambulance_s": round(response, 1),
                 "engine_unit": sent,
                 "engine_s": None if engine_resp is None else round(engine_resp, 1),
+                "engine_post": world.engines[sent] if sent else None,
+                "engine_eta_s": round(ed, 1) if sent else None,
                 "historical_first_s": min(c["historical_s"], hist_e) if hist_e == hist_e and hist_e is not None else c["historical_s"],
             }
+            if trace:
+                extra["closest_idle_engine_s"] = round(min((world.engine_drive(world.engines[u], node, c["hour"], c["nbhd"]) for u in idle_e), default=float("nan")), 1)
             if engine_resp is not None:
                 response = min(response, engine_resp)
         results.append({
@@ -770,18 +781,18 @@ def paired_ci(a, b, n=1000, seed=0):
     return {"median_diff_s": point, "ci95": [diffs[int(0.025 * n)], diffs[int(0.975 * n) - 1]], "n": len(pairs)}
 
 
-def worst_calls(world, calls, policy, n=50):
-    results, stats = simulate(world, calls, policy, trace=True)
+def worst_calls(world, calls, policy, n=50, engines=False):
+    results, stats = simulate(world, calls, policy, trace=True, engines=engines)
     for r in results:
         r["controllable_s"] = round(r["wait_s"] + r["eta_s"], 1)
         r["weekday"] = pd.Timestamp(r["t"]).day_name()
         r["bucket"] = BUCKET_OF[r["hour"]]
         r["avoidable_s"] = round(max(r["controllable_s"] - r["closest_post_drive_s"], 0), 1)
-    worst = sorted(results, key=lambda r: -r["controllable_s"])[:n]
-    keep = ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
+    worst = sorted(results, key=lambda r: -(r["response_s"] - r["processing_s"] if engines else r["controllable_s"]))[:n]
+    keep = (["response_s", "ambulance_s", "engine_unit", "engine_s", "closest_idle_engine_s"] if engines else []) + ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
             "closest_post", "closest_post_area", "closest_post_drive_s", "units_at_closest_post", "n_idle", "n_on_duty"]
     calls_by_id = {c["call_id"]: c for c in calls}
-    rows = [{k: (calls_by_id[r["call_id"]].get(k) if k == "station_area" else r.get(k)) for k in keep} for r in worst]
+    rows = [{k: (calls_by_id[r["call_id"]].get(k) if k in ("station_area", "priority") else r.get(k)) for k in keep} for r in worst]
     count = lambda key: dict(pd.Series([r[key] for r in worst]).value_counts().head(8))
     avoidable = pd.DataFrame(results).groupby(["nbhd", "bucket"])["avoidable_s"].sum().sort_values(ascending=False).head(10)
     return {
@@ -1220,14 +1231,14 @@ def main():
     if a.worst:
         if needs_isolation(a.policy):
             try:
-                out = worst_calls(world, calls, Replay(record_decisions(a.policy, a.split)), a.worst)
+                out = worst_calls(world, calls, Replay(record_decisions(a.policy, a.split, {"engines": a.engines})), a.worst, a.engines)
             except PolicyRejected as e:
                 raise SystemExit(f"rejected: {e}")
             except SandboxUnavailable as e:
                 raise SystemExit(str(e))
             out["summary"]["version"] = Path(str(a.policy)).stem
         else:
-            out = worst_calls(world, calls, a.policy, a.worst)
+            out = worst_calls(world, calls, a.policy, a.worst, a.engines)
         if a.out:
             Path(a.out).write_text(json.dumps(out, indent=1))
         print(json.dumps(out, indent=1))

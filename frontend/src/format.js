@@ -7,6 +7,7 @@ export const C = {
   bad: '#d6453d',
   slow: '#6d4fd8',
   unit: '#1f5fd1',
+  engine: '#0e7490',
   post: '#55606e',
   line: '#9aa3ad',
   ink: '#1c2430',

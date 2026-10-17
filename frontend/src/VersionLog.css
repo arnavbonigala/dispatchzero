@@ -32,19 +32,19 @@
 .vl-chart { width: 100%; height: auto; display: block; }
 .vl-grid { stroke: var(--vl-line); stroke-width: 1; }
 .vl-axis { fill: var(--vl-muted); font-size: 12px; }
-@media (max-width: 500px) { .vl-axis { font-size: 20px; } }
 .vl-best { fill: none; stroke: var(--vl-best); stroke-width: 2.5; }
 .vl-dot { stroke: var(--vl-card); stroke-width: 2; }
 .vl-accepted { fill: var(--vl-ok); }
 .vl-rejected { fill: var(--vl-rej); }
 
-.vl-feed { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-.vl-item { background: var(--vl-card); border-left: 4px solid var(--vl-ok); border-radius: 6px; padding: 10px 12px; }
+.vl-feed { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+.vl-item { background: var(--vl-card); border-left: 4px solid var(--vl-ok); border-radius: 6px; padding: 8px 10px; }
 .vl-item-rejected { border-left-color: var(--vl-rej); }
-.vl-item p { margin: 6px 0 0; font-size: 0.95rem; overflow-wrap: anywhere; }
-.vl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.vl-badge { font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--vl-rej); color: var(--vl-muted); }
+.vl-item p { margin: 4px 0 0; font-size: 0.85rem; line-height: 1.4; overflow-wrap: anywhere; }
+.vl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.85rem; }
+.vl-badge { font-size: 0.72rem; padding: 0 7px; border-radius: 999px; border: 1px solid var(--vl-rej); color: var(--vl-muted); }
 .vl-badge-ok { border-color: var(--vl-ok); color: var(--vl-ok); }
-.vl-meta, .vl-reason { color: var(--vl-muted); font-size: 0.85rem; }
-.vl-more { margin-top: 10px; font-size: 0.9rem; padding: 6px 12px; color: var(--vl-fg); background: var(--vl-card); border: 1px solid var(--vl-line); }
+.vl-meta { font-weight: 600; color: var(--vl-ok); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.vl-reason { color: var(--vl-muted); font-size: 0.8rem !important; }
+.vl-more { margin-top: 8px; font: inherit; font-size: 0.85rem; padding: 5px 12px; color: var(--vl-fg); background: var(--vl-card); border: 1px solid var(--vl-line); border-radius: 6px; cursor: pointer; }
 .vl-more:focus-visible { outline: 2px solid var(--vl-best); outline-offset: 2px; }

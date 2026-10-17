@@ -29,13 +29,20 @@ def load_json(*paths):
     return json.loads(p.read_text())
 
 
-def run(version, split):
-    if not re.fullmatch(r"baseline|v\d{3}", version) or split not in SPLITS or not (POLICIES / f"{version}.py").exists():
+def engines(mode):
+    if mode not in ("", "engines"):
+        raise HTTPException(404, "unknown mode")
+    return mode == "engines"
+
+
+def run(version, split, mode=""):
+    eng = engines(mode)
+    if not re.fullmatch(r"baseline|e\d{3}" if eng else r"baseline|v\d{3}", version) or split not in SPLITS or not (POLICIES / f"{version}.py").exists():
         raise HTTPException(404, "unknown version or split")
-    out = RUNS / "results" / f"{version}_{split}.json"
+    out = RUNS / "results" / f"{version}_{split}{'_engines' if eng else ''}.json"
     if not out.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
-        p = subprocess.run([sys.executable, str(Path(__file__).parent / "sim.py"), "--policy", version, "--split", split, "--out", str(out)],
+        p = subprocess.run([sys.executable, str(Path(__file__).parent / "sim.py"), "--policy", version, "--split", split, "--out", str(out), *(["--engines"] if eng else [])],
                            capture_output=True, text=True, timeout=180)
         if p.returncode:
             raise HTTPException(500, (p.stderr or p.stdout).strip()[-300:])
@@ -43,29 +50,31 @@ def run(version, split):
 
 
 @app.get("/versions")
-def versions():
-    p = first(RUNS / "versions.jsonl", FIXTURES / "versions.jsonl")
+def versions(mode: str = ""):
+    name = "engines" if engines(mode) else "versions"
+    p = first(RUNS / f"{name}.jsonl", FIXTURES / f"{name if name == 'versions' else 'engines_versions'}.jsonl")
     return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
 
 
 @app.get("/headline")
-def headline():
-    return load_json(RUNS / "headline.json", FIXTURES / "headline.json")
+def headline(mode: str = ""):
+    name = "engines_headline.json" if engines(mode) else "headline.json"
+    return load_json(RUNS / name, FIXTURES / name)
 
 
 @app.get("/summary/{version}")
-def summary(version: str, split: str = "frozen"):
-    return run(version, split)["summary"]
+def summary(version: str, split: str = "frozen", mode: str = ""):
+    return run(version, split, mode)["summary"]
 
 
 @app.get("/results/{version}")
-def results(version: str, split: str = "frozen"):
-    return run(version, split)["results"]
+def results(version: str, split: str = "frozen", mode: str = ""):
+    return run(version, split, mode)["results"]
 
 
 @app.get("/policy/{version}")
 def policy(version: str):
-    if not re.fullmatch(r"baseline|v\d{3}", version) or not (POLICIES / f"{version}.py").exists():
+    if not re.fullmatch(r"baseline|[ev]\d{3}", version) or not (POLICIES / f"{version}.py").exists():
         raise HTTPException(404, "unknown version")
     return {"version": version, "code": (POLICIES / f"{version}.py").read_text()}
 
