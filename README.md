@@ -24,8 +24,8 @@ cd frontend && npm install && npm run dev
 | `backend/fetch.py` | A | Data download |
 | `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
-| `backend/agent.py` | C | Improvement loop |
-| `backend/api.py` | C | FastAPI |
+| `backend/agent.py` | C | Improvement loop: `--iters N [--backend api\|cli\|stub]`, `--final`. Writes `backend/policies/vNNN.py` and `backend/runs/versions.jsonl` |
+| `backend/api.py` | C | FastAPI for the UI (`uvicorn api:app --port 8000` from `backend/`) |
 | `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading` |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + Leaflet |
@@ -69,3 +69,31 @@ OSM speed-limit travel times are scaled by one factor per time-of-day bucket so 
 `sim.py --policy NAME --split train --worst 50 --out FILE` returns the 50 calls with the most controllable time (queue wait + drive), each with the closest post, its drive time, which units were based there and whether they were idle, busy or off duty, plus `avoidable_s`, and aggregates: worst calls by neighborhood and bucket, and the top (neighborhood, bucket) cells by total avoidable seconds.
 
 Limits to state honestly: SF publishes no unit locations, so the simulator assumes idle units wait at posts. Per-call simulated drive time correlates only weakly with real drive time (Spearman 0.19, median absolute error about 245s), and the factors also absorb units not being at their post. Present gains as simulator-relative estimates calibrated to SF's real medians, not as predicted real-world seconds.
+
+## Agent loop
+
+```bash
+cd backend
+../.venv/bin/python agent.py --iters 8      # Claude rewrites the policy 8 times
+../.venv/bin/python agent.py --final        # once, at the end: frozen week vs baseline
+```
+
+Each iteration evaluates the current best on the training weeks, then sends Claude (`claude-sonnet-5-5`) the policy code, the training summary, the worst 50 calls from `sim.worst_calls`, per-hour and per-area tables, per-area demand, units on shift by hour, `POSTS`, `HOME` and the last 5 diagnoses. Claude replies with a `<diagnosis>` and a full policy file. The candidate is source-checked, saved as `backend/policies/vNNN.py` and run in a subprocess with a 10 minute timeout. It is promoted only if it beats the current best's median on the training weeks (gate 1) and then on the holdout week (gate 2), and it is rejected if more than 2% of its calls hit a policy error. The agent sees holdout results only as pass or fail and never sees the frozen week.
+
+`--backend api` (the default when `ANTHROPIC_API_KEY` is set) uses the Anthropic SDK. `--backend cli` uses a logged-in `claude` CLI in print mode with no tools. `--backend stub` returns canned policies, for testing the loop without spending tokens. Prompts and replies are saved under `backend/runs/llm/`.
+
+`--final` runs the best accepted version and the baseline on the frozen week (`sim.py --compare baseline`), fills `frozen_median` for those two rows of `versions.jsonl` and writes `backend/runs/headline.json`.
+
+## API
+
+| Route | Returns |
+|---|---|
+| `GET /versions` | `{source, versions}` from `runs/versions.jsonl`, else `fixtures/versions.jsonl`. Rows add `holdout_median`, `reason`, `stats` and `ts` to the `Version` contract |
+| `GET /headline` | Frozen-week result from `runs/headline.json`: baseline and agent medians, paired CI, calibration error |
+| `GET /runs` | Frozen-week summaries written by `--final` |
+| `GET /replay/{version}?split=frozen&day=YYYY-MM-DD` | `CallResult` rows sorted by time, plus the list of `days`. Computed with the simulator and cached in `runs/`; falls back to `fixtures/results.json` for the baseline |
+| `GET /posts` | Ambulance posts |
+| `GET /cameras` | `CameraReading` list from `runs/cameras.json` (where `cameras.py` should write), else fixtures |
+| `WS /live` | Pushes `{type: "versions" \| "cameras", ...}` whenever either file changes |
+
+Every response carries `source: "live" | "fixtures"`. The UI reads `VITE_API_URL` (default `http://localhost:8000`).
