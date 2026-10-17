@@ -150,7 +150,7 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] Simulator hardened against cheating policies (source check, opaque call ids, validated choices, relocation and return-drive costs)
 - [x] Holdout week split; paired bootstrap CI via `--compare`
 - [x] Worst-50 calls with context for the agent (`sim.py --worst 50`)
-- [x] Stretch: learned road speeds, gated on the holdout week: error 287s → 244s, adopted
+- [x] Stretch: learned road speeds, gated on the holdout week: error 206s → 196s, adopted
 - [ ] `edge_slowdowns()` wired into the simulator
 - [ ] With/without-jam test
 - [ ] README
