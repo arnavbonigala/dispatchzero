@@ -22,7 +22,7 @@ function replayStages(c) {
     stage('decide', 'Units dispatched', `DispatchZero sent ${c.unit} from post ${c.from_post}${c.engine_unit ? ` + engine ${c.engine_unit}` : ', no engine'}`, out, 0, out),
     c.engine_unit && stage('engine', `Engine ${c.engine_unit} en route`, `${mmss(c.engine_eta_s)} drive`, c.engine_s, engOut, c.engine_s),
     stage('amb', `Ambulance ${c.unit} en route`, `${mmss(c.eta_s)} drive`, c.ambulance_s, ambOut, c.ambulance_s),
-    stage('first', 'First paramedic on scene', `${firstBy} · ${mmss(c.response_s)}, ${vsTarget} the 8:00 target`, c.response_s, c.response_s, c.response_s, c.response_s <= TARGET_S),
+    stage('first', 'First paramedic on scene', `${firstBy} · ${mmss(c.response_s)}, ${vsTarget} the 8-minute target`, c.response_s, c.response_s, c.response_s, c.response_s <= TARGET_S),
   ].filter(Boolean).sort((a, b) => a.at - b.at)
 }
 

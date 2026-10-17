@@ -1,3 +1,4 @@
+import Dur from './Dur'
 import { clock, mmss } from './format'
 
 function Unit({ kind, unit, first }) {
@@ -17,7 +18,7 @@ function Side({ title, side, gm, vs }) {
   return (
     <div className={`dp-side ${gm ? 'gm' : ''}`}>
       <h3>{title}</h3>
-      <strong className="dp-first">{mmss(f.eta_s)}</strong>
+      <strong className="dp-first"><Dur s={f.eta_s} /></strong>
       <span className="dp-sub">until a paramedic arrives</span>
       {saved != null && <span className={saved >= 1 ? 'dp-gain' : 'dp-gain flat'}>{saved >= 1 ? `${mmss(saved)} sooner` : 'same as baseline'}</span>}
       <ul>

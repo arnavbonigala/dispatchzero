@@ -36,7 +36,8 @@ export function clock(sec) {
 export function mmss(sec) {
   if (sec == null || Number.isNaN(sec)) return '—'
   const s = Math.round(sec)
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const m = Math.floor(s / 60)
+  return m ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`
 }
 
 export function median(xs) {

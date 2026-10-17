@@ -1,5 +1,6 @@
 import state from '@fixtures/engines_state.json'
-import { clock, mmss } from './format'
+import Dur from './Dur'
+import { clock } from './format'
 
 const W = 300
 const H = 44
@@ -52,7 +53,7 @@ export default function SystemBar({ day, now, version, dispatchMs }) {
           <Spark rows={rows} upto={i} max={max} />
           <div className="live-grid">
             <div><span>Paramedic engines free</span><b>{r[3]} <small>of 34</small></b></div>
-            <div><span>If a call came in now</span><b>{mmss(r[5])} <small>closest free paramedic's drive</small></b></div>
+            <div><span>If a call came in now</span><b><Dur s={r[5]} /> <small>closest free paramedic's drive</small></b></div>
             {hour && <div><span>Calls this hour</span><b>{hour[1]} <small>forecast {hour[0].toFixed(1)}</small></b></div>}
             {hour && hour[3] != null && <div><span>Weather</span><b>{Math.round(hour[3])}°C <small>{hour[2] > 0.1 ? `rain ${hour[2]} mm` : 'dry'}</small></b></div>}
           </div>

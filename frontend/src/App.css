@@ -212,3 +212,5 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
   .eyebrow, .brand p { display: none; }
   .hero-main .big { font-size: 2.1rem; }
 }
+.dur + .dur { margin-left: 0.28em; }
+.dur-u { font-family: 'IBM Plex Sans', sans-serif; font-size: 0.6em; font-weight: 500; margin-left: 0.06em; letter-spacing: 0; }

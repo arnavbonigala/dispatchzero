@@ -5,7 +5,7 @@ import './VersionLog.css'
 
 const W = 360
 const H = 110
-const PAD = { l: 40, r: 8, t: 10, b: 10 }
+const PAD = { l: 54, r: 8, t: 10, b: 10 }
 const STEP_MS = 70
 const RACE_MS = 2000
 const BIG_GAIN_S = 20

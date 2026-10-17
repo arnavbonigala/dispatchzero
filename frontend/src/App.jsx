@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import CityMap from './CityMap'
 import SystemBar from './SystemBar'
+import Dur from './Dur'
 import DispatchPanel from './DispatchPanel'
 import VersionLog from './VersionLog.jsx'
 import CallFlow from './CallFlow.jsx'
@@ -234,18 +235,18 @@ function Hero({ headline }) {
     <section className="hero glass" aria-label="Result">
       <p className="eyebrow">First paramedic on scene · unseen week</p>
       <p className="hero-main">
-        <b className="big" aria-label={`${gain(mean)} ${mean <= 0 ? 'faster' : 'slower'} on average`}>{mmss(shown)}</b>
+        <b className="big" aria-label={`${gain(mean)} ${mean <= 0 ? 'faster' : 'slower'} on average`}><Dur s={shown} /></b>
         <span aria-hidden="true">{mean <= 0 ? 'faster' : 'slower'} on average</span>
       </p>
       <div className="hero-compare">
-        <div><span>Baseline</span><strong>{mmss(b.mean_s)}</strong></div>
+        <div><span>Baseline</span><strong><Dur s={b.mean_s} /></strong></div>
         <i aria-hidden="true">→</i>
-        <div className="gm"><span>DispatchZero</span><strong>{mmss(f.mean_s)}</strong></div>
+        <div className="gm"><span>DispatchZero</span><strong><Dur s={f.mean_s} /></strong></div>
       </div>
       <ul className="hero-sub">
-        {stats.map(([d, label]) => <li key={label}><b>{gain(d)}</b> {label}</li>)}
+        {stats.map(([d, label]) => <li key={label}><b><Dur s={Math.abs(d)} /></b> {label}</li>)}
         {f.nbhd_spread_s != null && b.nbhd_spread_s != null && (
-          <li>Gap between neighborhoods <b>{mmss(b.nbhd_spread_s)} → {mmss(f.nbhd_spread_s)}</b></li>
+          <li>Gap between neighborhoods <b><Dur s={b.nbhd_spread_s} /> → <Dur s={f.nbhd_spread_s} /></b></li>
         )}
       </ul>
     </section>
