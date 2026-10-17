@@ -165,7 +165,9 @@ def step(model):
 def headline():
     best = next(r["version"] for r in reversed(history()) if r["accepted"])
     s = evaluate(best, "frozen")
-    out = {"version": best, "frozen": {k: s[k] for k in ("slow_median_s", "median_s", "actual_median_s", "n")}, "vs_baseline": s["vs_baseline"]}
+    b = sim("--policy", "baseline", "--split", "frozen")
+    keys = ("slow_median_s", "median_s", "mean_s", "p90_s", "actual_median_s", "n")
+    out = {"version": best, "frozen": {k: s[k] for k in keys}, "baseline": {k: b[k] for k in keys}, "vs_baseline": s["vs_baseline"]}
     RUNS.mkdir(exist_ok=True)
     (RUNS / "headline.json").write_text(json.dumps(out, indent=1))
     print(json.dumps(out, indent=1))
