@@ -11,6 +11,7 @@ import numpy as np
 from fetch import fetch_cameras
 
 DATA = Path(__file__).parents[1] / "data"
+LOG = DATA / "camera_log.jsonl"  # every reading, appended, so the simulator can learn typical congestion by time of day
 TRACKER = Path(__file__).with_name("trackers.yaml")
 VEHICLES = [2, 3, 5, 7]  # COCO car, motorcycle, bus, truck
 CLIP_S = 3
@@ -105,6 +106,7 @@ def read_camera(cam, model, src=None):
         "name": cam["name"],
         "lat": cam["lat"],
         "lon": cam["lon"],
+        "route": cam.get("route", ""),
         "ts": datetime.now().isoformat(timespec="seconds"),
         "vehicles": vehicles,
         "moving_frac": round(moving_frac, 2),
@@ -123,6 +125,8 @@ def poll(cams, model, clips):
         readings.append(r)
         print(f"{r['camera_id']:6} {r['vehicles']:3d} veh  moving {r['moving_frac']:.2f}  slowdown {r['slowdown']:.2f}  {r['name']}")
     (DATA / "camera_readings.json").write_text(json.dumps(readings, indent=1))
+    with LOG.open("a") as f:
+        f.writelines(json.dumps(r) + "\n" for r in readings)
     return readings
 
 
@@ -137,7 +141,7 @@ def main():
     from ultralytics import YOLO
 
     model = YOLO("yolov8n.pt")
-    cams = load_cameras()
+    cams = [c for c in load_cameras() if c.get("stream")]  # some Caltrans cameras list no video link
     if args.camera:
         cams = [c for c in cams if c["camera_id"] in args.camera]
     else:
