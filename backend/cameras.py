@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ import numpy as np
 from fetch import fetch_cameras
 
 DATA = Path(__file__).parents[1] / "data"
+FRAMES = DATA / "camera_frames"  # the analysed frame per camera, for the UI to draw boxes on
 LOG = DATA / "camera_log.jsonl"  # every reading, appended, so the simulator can learn typical congestion by time of day
 SF_TZ = ZoneInfo("America/Los_Angeles")  # readings are bucketed by San Francisco hour wherever this runs
 TRACKER = Path(__file__).with_name("trackers.yaml")
@@ -25,6 +27,8 @@ K = 3.0
 IMGSZ = 960  # Caltrans streams are 320x240 to 720x480; upscaling finds the small far-off cars
 CONF = 0.2
 POLL_S = 30
+BLANK_STD = 15  # live frames measured 34 to 64; the 'No video' card 11.7, black frames about 1
+BLANK_SHARE = 0.4  # share of pixels on one grey level: live frames 0.02 or less, placeholders 0.45 to 0.92
 N_CAMERAS = 10
 
 
@@ -72,28 +76,50 @@ def read_clip(src, seconds=CLIP_S):
     cap.release()
     if not frames:
         raise RuntimeError(f"no frames from {src}")
+    if all(blank(f) for f in frames[:: max(1, len(frames) // 4)]):
+        raise RuntimeError("stream shows Caltrans's 'No video' card")  # otherwise it reads as an empty, free-flowing road
     return frames, fps / stride
 
 
+def blank(frame):
+    """Caltrans serves a flat grey 'No video' card or a black frame when a camera is down."""
+    g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return g.std() < BLANK_STD or np.bincount(g.ravel(), minlength=256).max() / g.size > BLANK_SHARE
+
+
 def measure(frames, fps, model):
+    """Vehicle count and share moving from stable tracks, plus the frame showing the most counted vehicles and
+    their boxes (normalized x1, y1, x2, y2, moving) so the UI can show what was measured."""
     tracks = {}
     for i, frame in enumerate(frames):
         r = model.track(frame, persist=i > 0, tracker=str(TRACKER), classes=VEHICLES, imgsz=IMGSZ, conf=CONF, verbose=False)[0]
         if r.boxes.id is None:
             continue
         for tid, (x, y, w, h) in zip(r.boxes.id.int().tolist(), r.boxes.xywh.tolist()):
-            tracks.setdefault(tid, []).append((i, x, y, h))
-    speeds = []
-    for pts in tracks.values():
+            tracks.setdefault(tid, []).append((i, x, y, w, h))
+    moving = {}
+    for tid, pts in tracks.items():
         if len(pts) < MIN_TRACK_FRAMES:
             continue
-        (i0, x0, y0, _), (i1, x1, y1, _) = pts[0], pts[-1]
-        box_h = float(np.median([p[3] for p in pts]))
-        speeds.append(math.hypot(x1 - x0, y1 - y0) / box_h / ((i1 - i0) / fps))
+        (i0, x0, y0, _, _), (i1, x1, y1, _, _) = pts[0], pts[-1]
+        box_h = float(np.median([p[4] for p in pts]))
+        moving[tid] = math.hypot(x1 - x0, y1 - y0) / box_h / ((i1 - i0) / fps) > MOVING_BOX_H_PER_S
     # stable tracks over the clip, not per-frame boxes: YOLOv8n drops most cars in a dense queue on any one frame
-    vehicles = len(speeds)
-    moving_frac = float(np.mean([s > MOVING_BOX_H_PER_S for s in speeds])) if speeds else 1.0
-    return vehicles, moving_frac
+    vehicles = len(moving)
+    moving_frac = float(np.mean(list(moving.values()))) if moving else 1.0
+    seen = [[(tid, p) for tid, pts in tracks.items() if tid in moving for p in pts if p[0] == i] for i in range(len(frames))]
+    best = max(range(len(frames)), key=lambda i: len(seen[i]))
+    fh, fw = frames[best].shape[:2]
+    boxes = [[round(max(x - w / 2, 0) / fw, 4), round(max(y - h / 2, 0) / fh, 4), round(min(x + w / 2, fw) / fw, 4), round(min(y + h / 2, fh) / fh, 4), moving[tid]]
+             for tid, (_, x, y, w, h) in seen[best]]
+    return vehicles, moving_frac, best, boxes
+
+
+def save_frame(camera_id, frame):
+    FRAMES.mkdir(parents=True, exist_ok=True)
+    tmp = FRAMES / f".{camera_id}.tmp.jpg"
+    cv2.imwrite(str(tmp), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    os.replace(tmp, FRAMES / f"{camera_id}.jpg")
 
 
 def slowdown(vehicles, moving_frac):
@@ -102,7 +128,9 @@ def slowdown(vehicles, moving_frac):
 
 def read_camera(cam, model, src=None):
     frames, fps = read_clip(src or cam["stream"])
-    vehicles, moving_frac = measure(frames, fps, model)
+    vehicles, moving_frac, best, boxes = measure(frames, fps, model)
+    save_frame(cam["camera_id"], frames[best])
+    fh, fw = frames[best].shape[:2]
     return {
         "camera_id": cam["camera_id"],
         "name": cam["name"],
@@ -113,6 +141,7 @@ def read_camera(cam, model, src=None):
         "vehicles": vehicles,
         "moving_frac": round(moving_frac, 2),
         "slowdown": round(slowdown(vehicles, moving_frac), 2),
+        "frame": {"w": fw, "h": fh, "boxes": boxes},
     }
 
 
@@ -130,7 +159,7 @@ def poll(cams, model, clips):
         print(f"{r['camera_id']:6} {r['vehicles']:3d} veh  moving {r['moving_frac']:.2f}  slowdown {r['slowdown']:.2f}  {r['name']}")
     (DATA / "camera_readings.json").write_text(json.dumps(readings, indent=1))
     with LOG.open("a") as f:
-        f.writelines(json.dumps(r) + "\n" for r in readings if not r.get("source"))
+        f.writelines(json.dumps({k: v for k, v in r.items() if k != "frame"}) + "\n" for r in readings if not r.get("source"))
     return readings
 
 
