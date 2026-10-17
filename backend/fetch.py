@@ -44,12 +44,15 @@ def window(today):
     return end - timedelta(weeks=WEEKS), end
 
 
-def fetch_rows(start, end):
+ENGINE_FIELDS = ["call_number", "unit_id", "als_unit", "received_dttm", "dispatch_dttm", "on_scene_dttm", "available_dttm"]
+
+
+def fetch_rows(start, end, unit_type="MEDIC", fields=FIELDS):
     rows, offset = [], 0
     while True:
         q = {
-            "$select": ",".join(FIELDS),
-            "$where": f"unit_type='MEDIC' AND received_dttm >= '{start}' AND received_dttm < '{end}'",
+            "$select": ",".join(fields),
+            "$where": f"unit_type='{unit_type}' AND received_dttm >= '{start}' AND received_dttm < '{end}'",
             "$order": "received_dttm,unit_id",
             "$limit": 50000,
             "$offset": offset,
@@ -129,6 +132,32 @@ def build_calls(rows, start):
     index = {p["station_area"]: p["post"] for p in posts}
     usual = {u: index[a] for u, a in homes.items()}
     return calls, posts, demand_homes(calls, index, sorted(usual)), usual, build_dispatches(raw, calls)
+
+
+def build_engines(rows, calls, posts):
+    e = pd.DataFrame(rows).dropna(subset=["dispatch_dttm", "available_dttm"])
+    for c in ["received_dttm", "dispatch_dttm", "on_scene_dttm", "available_dttm"]:
+        e[c] = pd.to_datetime(e[c])
+    e = e[(e["available_dttm"] > e["dispatch_dttm"]) & (e["available_dttm"] - e["dispatch_dttm"] < pd.Timedelta(hours=6))]
+    index = {p["station_area"]: p["post"] for p in posts}
+    als = e.groupby("unit_id")["als_unit"].mean()
+    engines = [{"unit_id": u, "post": index[u[1:]]} for u in sorted(als.index) if als[u] > 0.5 and u[1:] in index]
+    ids = {x["unit_id"] for x in engines}
+    medic = set(calls["call_id"])
+    first = e[e["unit_id"].isin(ids) & e["call_number"].isin(medic)].dropna(subset=["on_scene_dttm"]).sort_values("on_scene_dttm").groupby("call_number").first()
+    engine_s = (first["on_scene_dttm"] - first["received_dttm"]).dt.total_seconds()
+    calls["engine_s"] = calls["call_id"].map(engine_s).where(lambda s: s.between(30, 3600))
+    calls["engine_unit"] = calls["call_id"].map(first["unit_id"]).where(calls["engine_s"].notna())
+    on_scene = (first["available_dttm"] - first["on_scene_dttm"]).dt.total_seconds()
+    d = e[e["unit_id"].isin(ids)]
+    dispatches = pd.DataFrame({
+        "call_id": d["call_number"],
+        "unit_id": d["unit_id"],
+        "start": d["dispatch_dttm"].dt.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end": d["available_dttm"].dt.strftime("%Y-%m-%dT%H:%M:%S"),
+        "simulated": d["call_number"].isin(medic),
+    }).sort_values("start").reset_index(drop=True)
+    return {"engines": engines, "on_scene_s": float(on_scene[on_scene > 0].median())}, dispatches
 
 
 def demand_homes(calls, index, units):
@@ -228,6 +257,13 @@ def main():
     print(f"calls: {len(calls)} ({calls.groupby('split').size().to_dict()}), posts: {len(posts)}, units: {len(units)}")
     print(f"unit dispatches: {len(dispatches)} ({int(dispatches['simulated'].sum())} simulated, {int((~dispatches['simulated']).sum())} background)")
     print(f"historical median response: {calls['historical_s'].median():.0f}s")
+
+    engine_rows = fetch_rows(start, end, "ENGINE", ENGINE_FIELDS)
+    engines, engine_dispatches = build_engines(engine_rows, calls, posts)
+    calls.to_parquet(DATA / "calls.parquet", index=False)
+    engine_dispatches.to_parquet(DATA / "engine_dispatches.parquet", index=False)
+    (DATA / "engines.json").write_text(json.dumps(engines, indent=1))
+    print(f"paramedic engines: {len(engines['engines'])}, engine dispatches: {len(engine_dispatches)}, medic calls with an engine on scene: {calls['engine_s'].notna().mean():.0%}")
 
     hospitals = fetch_hospitals()
     (DATA / "hospitals.json").write_text(json.dumps(hospitals, indent=1))
