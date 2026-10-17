@@ -4,8 +4,15 @@ import bisect
 import importlib
 import importlib.util
 import json
+import os
 import random
+import shutil
 import statistics
+import subprocess
+import sys
+import signal
+import tempfile
+import time
 import types
 from pathlib import Path
 
@@ -36,7 +43,15 @@ SLOW_MIN_CALLS = 50
 OVERALL_TOLERANCE_S = 5.0
 PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority", "life_threatening")
 ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
-BANNED_ATTRS = {"gi_frame", "gi_code", "gi_yieldfrom", "cr_frame", "cr_code", "cr_await", "ag_frame", "ag_code", "f_globals", "f_locals", "f_builtins", "f_back", "f_code", "tb_frame", "tb_next", "co_consts", "mro"}
+BANNED_ATTRS = {"gi_frame", "gi_code", "gi_yieldfrom", "cr_frame", "cr_code", "cr_await", "ag_frame", "ag_code", "f_globals", "f_locals",
+                "f_builtins", "f_back", "f_code", "tb_frame", "tb_next", "co_consts", "mro", "format", "format_map"}
+POLICY_SEED = 0
+CHILD_TIMEOUT_S = 90
+CHILD_MAX_OUTPUT = 50_000_000
+UNSANDBOXED_ENV = "GM_UNSANDBOXED"
+BLOCKED_SERVICES = ["com.apple.coreservices.launchservicesd", "com.apple.lsd.mapdb", "com.apple.lsd.modifydb", "com.apple.coreservices.appleevents",
+                    "com.apple.pasteboard.1", "com.apple.SecurityServer", "com.apple.securityd", "com.apple.tccd", "com.apple.windowserver.active",
+                    "com.apple.coreservices.quarantine-resolver", "com.apple.SystemConfiguration.configd"]
 BANNED_NAMES = {"open", "eval", "exec", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "__import__", "input", "breakpoint", "memoryview", "type", "object", "super"}
 
 
@@ -61,35 +76,226 @@ def _module_exports(name):
 MODULE_EXPORTS = {m: _module_exports(m) for m in ALLOWED_IMPORTS}
 
 
+def _root_name(node):
+    while isinstance(node, (ast.Attribute, ast.Subscript, ast.Call)):
+        node = node.func if isinstance(node, ast.Call) else node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
 def check_source(src):
+    """Static checks on agent-written policy code. Imported modules may only be used as module.function from a
+    fixed export list, nothing may be stored as an attribute, and no classes or underscore names may be defined,
+    so a policy can't reach sys/os or patch objects the simulator relies on."""
     tree = ast.parse(src)
-    modules = {}
+    modules, imported = {}, set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
-                modules[a.asname or a.name.split(".")[0]] = a.name.split(".")[0]
+                modules[a.asname or a.name] = a.name
+        elif isinstance(node, ast.ImportFrom):
+            imported.update(a.asname or a.name for a in node.names)
     parent = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             bad = [a.name for a in node.names if a.name not in ALLOWED_IMPORTS]
         elif isinstance(node, ast.ImportFrom):
-            if node.module not in ALLOWED_IMPORTS or node.level:
+            if node.level or node.module not in ALLOWED_IMPORTS:
                 bad = [node.module or "."]
             else:
                 bad = [a.name for a in node.names if a.name not in MODULE_EXPORTS[node.module]]
+        elif isinstance(node, ast.ClassDef):
+            bad = [f"class {node.name}"]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            bad = [node.name] if node.name.startswith("__") else []
+        elif isinstance(node, ast.arg):
+            bad = [node.arg] if node.arg.startswith("__") else []
         elif isinstance(node, ast.Attribute):
             bad = [node.attr] if node.attr.startswith("_") or node.attr in BANNED_ATTRS else []
+            if not bad and not isinstance(node.ctx, ast.Load):
+                bad = [f"attribute assignment .{node.attr}"]
+        elif isinstance(node, ast.Subscript):
+            bad = [f"item assignment on {_root_name(node)}"] if not isinstance(node.ctx, ast.Load) and _root_name(node) in modules.keys() | imported else []
         elif isinstance(node, ast.Name):
             bad = [node.id] if node.id in BANNED_NAMES or node.id.startswith("__") else []
             if not bad and node.id in modules:
-                # an imported module may only be used as module.function, never passed around or rebound
                 up = parent.get(node)
                 ok = isinstance(up, ast.Attribute) and up.value is node and up.attr in MODULE_EXPORTS[modules[node.id]]
-                bad = [] if ok or isinstance(up, ast.alias) else [node.id]
+                bad = [] if ok else [node.id]
+            elif not bad and node.id in imported and not isinstance(node.ctx, ast.Load):
+                bad = [f"reassigning imported {node.id}"]
         else:
             bad = []
         if bad:
             raise PolicyRejected(f"policy uses disallowed {bad[0]!r} (line {getattr(node, 'lineno', '?')})")
+
+
+class SandboxUnavailable(Exception):
+    pass
+
+
+def needs_isolation(policy):
+    """Everything except the shipped baseline runs sandboxed."""
+    if not isinstance(policy, (str, Path)):
+        return False
+    if str(policy) == "baseline":
+        return False
+    path = Path(str(policy)) if str(policy).endswith(".py") else POLICIES / f"{policy}.py"
+    return path.resolve() != (POLICIES / "baseline.py").resolve()
+
+
+def policy_file(policy):
+    policy = str(policy)
+    return (Path(policy) if policy.endswith(".py") else POLICIES / f"{policy}.py").resolve()
+
+
+def sandbox_profile(workdir, policy_path):
+    """macOS seatbelt profile for a policy run: no network, no new processes or risky system services, writes
+    only to workdir, and file contents readable only from Python, the simulator code and its data."""
+    q = lambda p: str(Path(p).resolve()).replace("\\", "\\\\").replace('"', '\\"')
+    here = Path(__file__).resolve().parent
+    reads = [sys.prefix, sys.base_prefix, sys.exec_prefix, here, DATA, workdir, "/System", "/usr/lib", "/usr/share", "/private/var/db/timezone",
+             "/private/var/db/dyld", "/Library/Apple", "/dev"]
+    allow_read = " ".join(f'(subpath "{q(r)}")' for r in reads) + f' (literal "{q(policy_path)}") (literal "/private/etc/localtime") (literal "/")'
+    services = " ".join(f'(global-name "{n}")' for n in BLOCKED_SERVICES)
+    return f"""(version 1)
+(allow default)
+(deny network*)
+(deny process-fork)
+(deny process-exec*)
+(allow process-exec* (subpath "{q(sys.base_prefix)}") (subpath "{q(sys.prefix)}"))
+(deny mach-lookup {services})
+(deny file-write*)
+(allow file-write* (subpath "{q(workdir)}") (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper"))
+(deny file-read-data)
+(allow file-read-data {allow_read})
+"""
+
+
+def child_env():
+    keep = ("PATH", "LANG", "LC_ALL", "TMPDIR")
+    env = {k: os.environ[k] for k in keep if k in os.environ}
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["HOME"] = tempfile.gettempdir()
+    return env
+
+
+def _clean_stale_workdirs(max_age_s=3600):
+    now = time.time()
+    for d in Path(tempfile.gettempdir()).glob("gm-policy-*"):
+        try:
+            if now - d.stat().st_mtime > max_age_s:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def record_decisions(policy, split, sim_kwargs=None):
+    """Run an agent-written policy in a separate, sandboxed process and return only its decisions."""
+    check_source(policy_file(policy).read_text())
+    sandboxed = sys.platform == "darwin" and shutil.which("sandbox-exec")
+    if not sandboxed and os.environ.get(UNSANDBOXED_ENV) != "1":
+        raise SandboxUnavailable(f"no sandbox-exec on this machine; set {UNSANDBOXED_ENV}=1 to run agent policies without an OS sandbox")
+    if not sandboxed:
+        print(f"warning: running {policy} without an OS sandbox ({UNSANDBOXED_ENV}=1)", file=sys.stderr)
+    _clean_stale_workdirs()
+    workdir = Path(tempfile.mkdtemp(prefix="gm-policy-")).resolve()
+    try:
+        out = workdir / "decisions.json"
+        cmd = [sys.executable, str(Path(__file__).resolve()), "--child", "--policy", str(policy_file(policy)), "--split", split,
+               "--child-kwargs", json.dumps(sim_kwargs or {}), "--out", str(out)]
+        if sandboxed:
+            cmd = ["sandbox-exec", "-p", sandbox_profile(workdir, policy_file(policy))] + cmd
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=workdir, env=child_env(), start_new_session=True)
+        try:
+            code = proc.wait(timeout=CHILD_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+            raise PolicyRejected(f"policy run timed out after {CHILD_TIMEOUT_S}s")
+        if code != 0 or not out.exists() or out.stat().st_size > CHILD_MAX_OUTPUT:
+            raise PolicyRejected(f"policy run crashed (exit {code})")
+        try:
+            return json.loads(out.read_text())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise PolicyRejected("policy run returned unreadable output")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+ERROR = {"error": 1}
+
+
+class Recorder:
+    """Child side: wraps the policy, hands the simulator sanitized decisions and logs exactly those."""
+
+    def __init__(self, policy):
+        self.policy = policy
+        self.log = {"plans": [], "choices": [], "engines": [], "has_send_engine": hasattr(policy, "send_engine")}
+        if self.log["has_send_engine"]:
+            self.send_engine = self._send_engine
+
+    def post_plan(self, hour, units):
+        try:
+            plan = {u: int(p) for u, p in dict(self.policy.post_plan(hour, units)).items() if type(u) is str}
+        except BaseException:
+            self.log["plans"].append(ERROR)
+            raise RuntimeError("post_plan failed")
+        self.log["plans"].append(plan)
+        return plan
+
+    def choose_unit(self, call, idle, eta):
+        try:
+            chosen = self.policy.choose_unit(call, idle, eta)
+        except BaseException:
+            self.log["choices"].append(ERROR)
+            raise RuntimeError("choose_unit failed")
+        chosen = chosen if type(chosen) is str else None
+        self.log["choices"].append(chosen)
+        return chosen
+
+    def _send_engine(self, call, engines, eta, ambulance_s):
+        try:
+            sent = self.policy.send_engine(call, engines, eta, ambulance_s)
+        except BaseException:
+            self.log["engines"].append(ERROR)
+            raise RuntimeError("send_engine failed")
+        sent = sent if sent is None or type(sent) is str else "\x00invalid"
+        self.log["engines"].append(sent)
+        return sent
+
+
+class Replay:
+    """Parent side: feeds recorded decisions back to the simulator in order. Only plain str/int values survive."""
+
+    def __init__(self, log):
+        plans = [p if p == ERROR else {u: v for u, v in p.items() if type(u) is str and type(v) is int}
+                 for p in log.get("plans", []) if isinstance(p, dict)]
+        pick = lambda xs: [x if x == ERROR or x is None or type(x) is str else None for x in xs] if isinstance(xs, list) else []
+        self._plans, self._choices, self._engines = iter(plans), iter(pick(log.get("choices"))), iter(pick(log.get("engines")))
+        if log.get("has_send_engine") is True:
+            self.send_engine = self._send_engine
+
+    @staticmethod
+    def _next(it, default):
+        x = next(it, default)
+        if x == ERROR:
+            raise RuntimeError("policy raised")
+        return x
+
+    def post_plan(self, hour, units):
+        return self._next(self._plans, {})
+
+    def choose_unit(self, call, idle, eta):
+        return self._next(self._choices, None)
+
+    def _send_engine(self, call, engines, eta, ambulance_s):
+        return self._next(self._engines, None)
+
+
+def run_isolated(policy, split, world, calls, **sim_kwargs):
+    """Simulate an agent-written policy without ever importing it here: the sandboxed child records its decisions
+    and this process replays them, so every scored number comes from simulator code."""
+    return simulate(world, calls, Replay(record_decisions(policy, split, sim_kwargs)), **sim_kwargs)
 
 
 class Roads:
@@ -208,6 +414,7 @@ def load_policy(policy, world):
     mod.ENGINE_LOAD = dict(world.engine_load)
     mod.WEATHER = {k: dict(v) for k, v in world.weather.items()}
     mod.NBHD = {k: dict(v) for k, v in world.nbhd_info.items()}
+    random.seed(POLICY_SEED)
     spec.loader.exec_module(mod)
     return mod
 
@@ -359,6 +566,7 @@ def load_calls(split=None):
 
 def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_entry=False, engines=False):
     policy = load_policy(policy, world)
+    random.seed(POLICY_SEED)
     n_posts = len(world.post_nodes)
     busy = {u: 0 for u in world.units}
     post = dict(world.homes)
@@ -796,6 +1004,12 @@ def self_check():
             return "E9"
 
     assert simulate(we, ec[:1], BadEngine, engines=True)[1]["invalid_choice"] == 1
+    eng_calls = ec + [{**calls[2], "t": "2026-01-01T12:03:00"}]
+    for pol in (Base, Engine, BadEngine):
+        rec = Recorder(pol)
+        direct = simulate(we, eng_calls, rec, engines=True)
+        replayed = simulate(we, eng_calls, Replay(json.loads(json.dumps(rec.log))), engines=True)
+        assert json.dumps(direct, default=str) == json.dumps(replayed, default=str), (pol, direct, replayed)
 
     class Bad(Base):
         @staticmethod
@@ -835,14 +1049,36 @@ def self_check():
 
     simulate(world_(), calls, Peek)
 
-    for src in ["from statistics import sys", "import statistics\nx = statistics.sys", "import statistics as s\nt = s\nt.sys", "import collections.abc",
-                "g = (x for x in [1])\nf = g.gi_frame.f_globals", "from . import sim", "import os", "import sys", "from pathlib import Path", "x = eta.__self__", "f = open('x')", "import sim", "g = getattr(eta, 'a')"]:
+    for src in ["from statistics import sys", "import statistics\nx = statistics.sys", "import statistics as s\nt = s", "import collections.abc",
+                "from . import sim", "g = (x for x in [1])\nf = g.gi_frame", "x = '{0.gi_frame}'.format(1)",
+                "import statistics\nstatistics.median = min", "import bisect\ndel bisect.bisect_right", "import random\nrandom.Random = None",
+                "from collections import Counter\nCounter.most_common = None", "from statistics import median\nmedian = min",
+                "from collections import Counter\nC = Counter\nC.most_common = None", "import random\nR = random.Random\nR.random = None",
+                "class S(str):\n    pass", "def __eq__(a, b):\n    return True", "def f(__x):\n    return 1",
+                "import os", "import sys", "from pathlib import Path", "x = eta.__self__", "f = open('x')", "import sim", "g = getattr(eta, 'a')"]:
         try:
             check_source(src)
             raise AssertionError(f"not rejected: {src}")
         except PolicyRejected:
             pass
     check_source((POLICIES / "baseline.py").read_text())
+    check_source("import math\nimport random\nfrom collections import Counter, defaultdict\nrandom.seed(1)\nr = random.Random(2)\nx = math.sqrt(4) + Counter('ab')['a']")
+    assert needs_isolation("v001") and needs_isolation("/tmp/x/baseline.py") and not needs_isolation("baseline")
+    assert not needs_isolation(POLICIES / "baseline.py")
+    check_source("def _helper(a):\n    return a\nfor _ in range(2):\n    pass")
+
+    class Rand(Base):
+        @staticmethod
+        def choose_unit(call, idle, eta):
+            if random.random() < 0.2:
+                raise ValueError
+            return random.choice(idle)["unit_id"] if random.random() < 0.5 else "nope"
+
+    for pol in (Base, Rand, Crash, Mover):
+        rec = Recorder(pol)
+        direct = simulate(world_(), calls, rec)
+        replayed = simulate(world_(), calls, Replay(json.loads(json.dumps(rec.log))))
+        assert direct == replayed, (pol, direct, replayed)
 
     w = world_()
     w.rel = {"x|midday": 1.5}
@@ -937,7 +1173,11 @@ def main():
     ap.add_argument("--engines", action="store_true")
     ap.add_argument("--jam-test", metavar="CAMERA_ID")
     ap.add_argument("--slowdown", type=float, default=4.0)
+    ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--child-kwargs", default="{}", help=argparse.SUPPRESS)
     a = ap.parse_args()
+    if a.child:
+        return child_main(a)
     if a.self_check:
         return self_check()
     world = World.load()
@@ -962,10 +1202,22 @@ def main():
             print(json.dumps(pick_slow(world), indent=1))
         return
     calls = load_calls(a.split)
+
+    def run(policy, **kw):
+        """Agent-written policies are recorded in a sandboxed child and replayed here; the baseline runs directly."""
+        try:
+            if needs_isolation(policy):
+                return run_isolated(policy, a.split, world, calls, **kw)
+            return simulate(world, calls, policy, **kw)
+        except PolicyRejected as e:
+            raise SystemExit(f"rejected: {e}")
+        except SandboxUnavailable as e:
+            raise SystemExit(str(e))
+
     if a.offload_cap is not None or a.dispatch_at_entry:
-        base, _ = simulate(world, calls, a.policy, engines=a.engines)
+        base, _ = run(a.policy, engines=a.engines)
         cap = a.offload_cap * 60 if a.offload_cap is not None else None
-        capped, _ = simulate(world, calls, a.policy, offload_cap_s=cap, dispatch_at_entry=a.dispatch_at_entry, engines=a.engines)
+        capped, _ = run(a.policy, offload_cap_s=cap, dispatch_at_entry=a.dispatch_at_entry, engines=a.engines)
         print(json.dumps({
             "offload_cap_min": a.offload_cap,
             "dispatch_at_entry": a.dispatch_at_entry,
@@ -977,15 +1229,22 @@ def main():
         }, indent=1))
         return
     if a.worst:
-        out = worst_calls(world, calls, a.policy, a.worst, a.engines)
+        if needs_isolation(a.policy):
+            try:
+                out = worst_calls(world, calls, Replay(record_decisions(a.policy, a.split, {"engines": a.engines})), a.worst, a.engines)
+            except PolicyRejected as e:
+                raise SystemExit(f"rejected: {e}")
+            except SandboxUnavailable as e:
+                raise SystemExit(str(e))
+            out["summary"]["version"] = Path(str(a.policy)).stem
+        else:
+            out = worst_calls(world, calls, a.policy, a.worst, a.engines)
         if a.out:
             Path(a.out).write_text(json.dumps(out, indent=1))
         print(json.dumps(out, indent=1))
         return
-    try:
-        results, stats = simulate(world, calls, a.policy, engines=a.engines)
-    except PolicyRejected as e:
-        raise SystemExit(f"rejected: {e}")
+    results, stats = run(a.policy, engines=a.engines)
+    compare = run(a.compare, engines=a.engines)[0] if a.compare else None
     summary = summarize(results, Path(a.policy).stem, a.split)
     summary["actual_median_s"] = statistics.median(r["historical_s"] for r in results)
     if a.engines:
@@ -993,10 +1252,24 @@ def main():
         summary["ambulance_median_s"] = statistics.median(r["ambulance_s"] for r in results)
     summary["stats"] = stats
     if a.compare:
-        summary["vs_" + Path(a.compare).stem] = goal(results, simulate(world, calls, a.compare, engines=a.engines)[0])
+        summary["vs_" + Path(a.compare).stem] = goal(results, compare)
     if a.out:
-        Path(a.out).write_text(json.dumps({"summary": summary, "results": results}, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+        Path(a.out).write_text(json.dumps({"summary": summary, "results": results}, default=_json_default))
     print(json.dumps(summary, indent=1))
+
+
+def _json_default(o):
+    return o.item() if hasattr(o, "item") else str(o)
+
+
+def child_main(a):
+    """Inside the sandbox: run one policy and write only its decisions for the parent to replay."""
+    kwargs = json.loads(a.child_kwargs)
+    world = World.load()
+    calls = load_calls(a.split)
+    rec = Recorder(load_policy(a.policy, world))
+    simulate(world, calls, rec, **{k: kwargs[k] for k in ("offload_cap_s", "dispatch_at_entry", "engines") if k in kwargs})
+    Path(a.out).write_text(json.dumps(rec.log))
 
 
 if __name__ == "__main__":
