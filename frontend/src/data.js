@@ -21,7 +21,17 @@ async function api(path, ms = QUICK_MS) {
   return r.json()
 }
 
-const withImages = (cams) => cams.map((c) => ({ ...c, image: cameraImages[c.camera_id] }))
+// Frames cameras.py analysed, bundled from fixtures for when the API is down.
+const fixtureFrames = Object.fromEntries(
+  Object.entries(import.meta.glob('../../fixtures/camera_frames/*.jpg', { eager: true, query: '?url', import: 'default' }))
+    .map(([path, url]) => [path.split('/').pop().replace('.jpg', ''), url]),
+)
+const frameUrl = (c, live) => {
+  if (!c.frame) return null
+  if (live) return `/api/cameras/${c.camera_id}/frame.jpg?t=${encodeURIComponent(c.ts ?? '')}`
+  return fixtureFrames[c.camera_id] ?? null
+}
+const withImages = (cams, live = false) => cams.map((c) => ({ ...c, image: cameraImages[c.camera_id], frameUrl: frameUrl(c, live) }))
 
 export function loadFixtures() {
   return {
@@ -57,7 +67,7 @@ export async function loadLive() {
   if (headline.status === 'fulfilled') live.headline = headline.value
   if (posts.status === 'fulfilled') live.posts = posts.value
   if (slow.status === 'fulfilled') live.slowNbhds = new Set(slow.value.nbhds)
-  if (cameras.status === 'fulfilled') live.cameras = withImages(cameras.value)
+  if (cameras.status === 'fulfilled') live.cameras = withImages(cameras.value, true)
 
   const agentVersion = versions.status === 'fulfilled' ? bestAgent(versions.value) : null
   const [baseline, agent] = await Promise.allSettled([
@@ -72,7 +82,7 @@ export async function loadLive() {
 }
 
 export async function loadCameras() {
-  return withImages(await api('/cameras'))
+  return withImages(await api('/cameras'), true)
 }
 
 // One incident at a frozen-week moment, e.g. t = '2026-10-06T17:40:00'. See backend/dispatch.py.

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).parents[1]
@@ -93,6 +94,17 @@ def policy(version: str):
 @app.get("/cameras")
 def cameras():
     return load_json(DATA / "camera_readings.json", FIXTURES / "cameras.json")
+
+
+@app.get("/cameras/{camera_id}/frame.jpg")
+def camera_frame(camera_id: str):
+    """The frame cameras.py analysed; its reading's frame.boxes are normalized to this image."""
+    if not re.fullmatch(r"[A-Za-z0-9]{1,16}", camera_id):
+        raise HTTPException(404, "unknown camera")
+    path = first(DATA / "camera_frames" / f"{camera_id}.jpg", FIXTURES / "camera_frames" / f"{camera_id}.jpg")
+    if not path:
+        raise HTTPException(404, "no analysed frame")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/posts")

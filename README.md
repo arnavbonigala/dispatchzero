@@ -29,7 +29,7 @@ cd frontend && npm install && npm run dev
 | `backend/agent.py` | C | Improvement loop: `--iters N [--model sonnet] [--traffic]`, `--headline` |
 | `backend/api.py` | C | FastAPI: `uvicorn --app-dir backend api:app --port 8000` |
 | `backend/dispatch.py` | B | Live dispatch of one incident: replays the frozen week to that moment, then compares baseline and the best engine-mode version (ambulance, engine, hospital, routes). `/dispatch?lat=&lon=&t=&priority=2\|3`; CLI `dispatch.py LAT LON T --priority 2`. Set `GOOGLE_MAPS_API_KEY` to re-time the closest candidates with live traffic. Without it (or when a Google request fails), the latest `data/camera_readings.json`, if under 30 minutes old, slows the freeways it covers: every idle unit's time gets the jam's extra seconds, candidates are ranked on those times, the ambulance route avoids the jam (engine and hospital routes do not), and `traffic_reason` says when a slowed camera on the original pick's route changed the pick (`traffic: google\|cameras\|osm`, `cameras_ts`) |
-| `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading`; latest in `data/camera_readings.json`, history appended to `data/camera_log.jsonl` (timestamps in San Francisco time; `--clip` replays are marked `"source": "clip"` and never logged) |
+| `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading`; latest in `data/camera_readings.json`, history appended to `data/camera_log.jsonl` (timestamps in San Francisco time; `--clip` replays are marked `"source": "clip"` and never logged). Each reading's `frame` is `{w, h, boxes}`: the clip frame showing the most counted vehicles, saved as `data/camera_frames/ID.jpg`, with every counted car as `[x1, y1, x2, y2, moving]` normalized to 0..1. Streams showing Caltrans's 'No video' card or a black frame are skipped, not read as empty roads |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + Leaflet |
 | `PITCH.md` | C | 3-minute pitch script with the real frozen-week numbers, slide outline and judge Q&A |
@@ -194,6 +194,7 @@ Current result: holdout deviance 4,135 vs 5,504 for the naive average (better), 
 | `GET /results/{version}?split=frozen` | Per-call results for the replay |
 | `GET /policy/{version}` | Policy source |
 | `GET /cameras` | `data/camera_readings.json`, or the fixture |
+| `GET /cameras/{id}/frame.jpg` | The analysed frame for that camera (`data/camera_frames/`, or `fixtures/camera_frames/`); the UI draws `frame.boxes` on it, green for moving cars and red for stopped |
 | `GET /posts`, `/slow`, `/speeds` | `data/` files |
 
 Results are cached in `runs/results/{version}_{split}.json`. Delete that folder after any change to default scoring. The Vite dev server proxies `/api` to port 8000.

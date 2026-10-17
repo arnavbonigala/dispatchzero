@@ -4,6 +4,7 @@ import { MapboxOverlay } from '@deck.gl/mapbox'
 import { ArcLayer, ColumnLayer, GeoJsonLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { C, mmss, responseColor, rgb, slowdownColor } from './format'
+import CameraView from './CameraView'
 
 const STYLE = 'https://tiles.openfreemap.org/styles/dark'
 const RECENT_S = 3600
@@ -103,7 +104,8 @@ function tooltip({ layer, object }) {
 export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, cameras, armed, onPick, result, elapsed }) {
   const mapRef = useRef(null)
   const [flat, setFlat] = useState(true)
-  const [camera, setCamera] = useState(null)
+  const [cameraId, setCameraId] = useState(null)
+  const camera = cameraId ? cameras?.find((c) => c.camera_id === cameraId) : null // follows each 30 s refresh
   const wave = 0.5 + 0.5 * Math.sin(elapsed / 8)
 
   const done = calls.filter((c) => now >= c.start + c.response_s)
@@ -206,7 +208,7 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
   ]
 
   const click = (info) => {
-    if (info.layer?.id === 'cameras' && info.object) return setCamera(info.object)
+    if (info.layer?.id === 'cameras' && info.object) return setCameraId(info.object.camera_id)
     if (armed && info.coordinate) onPick(info.coordinate[1], info.coordinate[0])
   }
 
@@ -228,16 +230,7 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
         {flat ? '3D' : '2D'}
       </button>
       {armed && <p className="armed-hint" role="status">Click anywhere in San Francisco to report an incident</p>}
-      {camera && (
-        <div className="cam-card glass" role="dialog" aria-label={camera.name}>
-          <div className="cam-head">
-            <b>{camera.name}</b>
-            <button className="dp-link" onClick={() => setCamera(null)} aria-label="Close camera">Close</button>
-          </div>
-          {camera.image && <img src={camera.image} alt={`Caltrans camera ${camera.camera_id}`} />}
-          <span>{camera.vehicles} vehicles · {Math.round(camera.moving_frac * 100)}% moving · slowdown ×{camera.slowdown.toFixed(1)}</span>
-        </div>
-      )}
+      {camera && <CameraView key={camera.camera_id} camera={camera} onClose={() => setCameraId(null)} />}
     </div>
   )
 }
