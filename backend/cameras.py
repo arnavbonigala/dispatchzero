@@ -27,8 +27,7 @@ K = 3.0
 IMGSZ = 960  # Caltrans streams are 320x240 to 720x480; upscaling finds the small far-off cars
 CONF = 0.2
 POLL_S = 30
-BLANK_STD = 15  # live frames measured 34 to 64; the 'No video' card 11.7, black frames about 1
-BLANK_SHARE = 0.4  # share of pixels on one grey level: live frames 0.02 or less, placeholders 0.45 to 0.92
+BLANK_SHARE = 0.4  # share of pixels on one grey level: live frames 0.02 or less (0.06 with fog-like contrast), placeholders 0.45 to 0.92
 N_CAMERAS = 10
 
 
@@ -84,7 +83,7 @@ def read_clip(src, seconds=CLIP_S):
 def blank(frame):
     """Caltrans serves a flat grey 'No video' card or a black frame when a camera is down."""
     g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return g.std() < BLANK_STD or np.bincount(g.ravel(), minlength=256).max() / g.size > BLANK_SHARE
+    return np.bincount(g.ravel(), minlength=256).max() / g.size > BLANK_SHARE
 
 
 def measure(frames, fps, model):
@@ -117,9 +116,8 @@ def measure(frames, fps, model):
 
 def save_frame(camera_id, frame):
     FRAMES.mkdir(parents=True, exist_ok=True)
-    tmp = FRAMES / f".{camera_id}.tmp.jpg"
-    cv2.imwrite(str(tmp), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-    os.replace(tmp, FRAMES / f"{camera_id}.jpg")
+    # staged until poll() has written the readings, so the served frame always matches the served boxes
+    cv2.imwrite(str(FRAMES / f".{camera_id}.pending.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
 
 def slowdown(vehicles, moving_frac):
@@ -157,7 +155,13 @@ def poll(cams, model, clips):
             r["source"] = "clip"  # a saved video, not today's traffic
         readings.append(r)
         print(f"{r['camera_id']:6} {r['vehicles']:3d} veh  moving {r['moving_frac']:.2f}  slowdown {r['slowdown']:.2f}  {r['name']}")
-    (DATA / "camera_readings.json").write_text(json.dumps(readings, indent=1))
+    tmp = DATA / ".camera_readings.json.tmp"
+    tmp.write_text(json.dumps(readings, indent=1))
+    os.replace(tmp, DATA / "camera_readings.json")
+    for r in readings:
+        pending = FRAMES / f".{r['camera_id']}.pending.jpg"
+        if pending.exists():
+            os.replace(pending, FRAMES / f"{r['camera_id']}.jpg")
     with LOG.open("a") as f:
         f.writelines(json.dumps({k: v for k, v in r.items() if k != "frame"}) + "\n" for r in readings if not r.get("source"))
     return readings
