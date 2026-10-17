@@ -231,7 +231,8 @@ def learning_curve():
 
 
 def main():
-    base, gm = results("baseline"), results("e036")
+    best = json.loads((ROOT / "fixtures" / "engines_headline.json").read_text())["version"]
+    base, gm = results("baseline"), results(best)
     slow = set(json.loads((ROOT / "data" / "slow_nbhds.json").read_text())["nbhds"])
     headline()
     neighborhoods(base, gm, slow)
