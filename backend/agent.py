@@ -162,6 +162,23 @@ def step(model):
     record(row)
 
 
+def rescore():
+    rows = history()
+    for r in rows:
+        if not (POLICIES / f"{r['version']}.py").exists():
+            continue
+        train = evaluate(r["version"], "train")
+        holdout = evaluate(r["version"], "holdout")
+        g = holdout["vs_baseline"]
+        r |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"],
+              "holdout_slow_diff": g["slow_nbhds"]["median_diff_s"], "holdout_slow_ci": g["slow_nbhds"]["ci95"], "holdout_all_diff": g["everyone"]["median_diff_s"],
+              "holdout_passes": g["passes"] or r["version"] == "baseline"}
+        if r["accepted"]:
+            r["frozen_median"] = sim("--policy", r["version"], "--split", "frozen")["median_s"]
+        print(r["version"], r["accepted"], r["holdout_passes"], round(r["holdout_slow_diff"]), round(r["holdout_all_diff"], 1), flush=True)
+    VERSIONS.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+
 def headline():
     best = next(r["version"] for r in reversed(history()) if r["accepted"])
     s = evaluate(best, "frozen")
@@ -178,9 +195,12 @@ def main():
     ap.add_argument("--iters", type=int, default=1)
     ap.add_argument("--model", default="sonnet")
     ap.add_argument("--headline", action="store_true")
+    ap.add_argument("--rescore", action="store_true")
     a = ap.parse_args()
     if not history():
         seed()
+    if a.rescore:
+        return rescore()
     if a.headline:
         return headline()
     for _ in range(a.iters):
