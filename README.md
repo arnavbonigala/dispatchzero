@@ -22,7 +22,7 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | `backend/contracts.py` | All | Frozen shapes: `Call`, `IdleUnit`, `CallResult`, `Summary`, `Version`, `CameraReading`, policy signatures |
 | `backend/fetch.py` | A | Data download |
-| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--self-check`, `--fixtures` |
+| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
 | `backend/agent.py` | C | Improvement loop |
 | `backend/api.py` | C | FastAPI |
@@ -78,6 +78,15 @@ Limits to state honestly: SF publishes no unit locations, so the simulator assum
 `--fit-speeds` learns one multiplier per (destination neighborhood × time bucket), about 200 cells, in the additive model: `real drive ≈ route time from the unit's usual post × multiplier + bucket offset`, fit on weeks 1 to 3. Cells with few calls shrink toward 1 (weight 30 calls), and multipliers are capped to 0.5 to 2×. They are adopted only if they lower median drive-time error on the holdout week, then calibration is re-run. Current result: holdout error 206s → 196s (adopted). Fastest: Outer Richmond, Bernal Heights, Sunset (about 0.72×); slowest: Tenderloin (capped at 2×).
 
 `data/speeds.json` holds `adopted`, the error `report`, `rel` (`"Neighborhood|bucket": multiplier`), and `nbhd_centers` (`"Neighborhood": [lat, lon]`) for the UI heatmap.
+
+## Cameras in the simulator
+
+- `edge_slowdowns(readings, roads)` turns `CameraReading`s into `{edge_index: factor}`: road edges within 600 m of the camera whose OSM `ref` matches the camera's route (`US-101` → `US 101`, `SR-1` → `CA 1`) are slowed by the camera's `slowdown`. Readings with `slowdown <= 1` change nothing.
+- `World.load(slowdowns=...)` rebuilds travel times with those slowdowns.
+- `Roads.path(src_node, dst_node, slowdowns)` returns `(seconds, [[lat, lon], ...])` for drawing a route on the map.
+- `--jam-test CAMERA_ID` measures the direct effect of a jam on the holdout week: calls whose best route crosses the jam, calls that should be sent from a different post, and seconds saved by switching versus dispatching blind.
+
+Finding: in-city ambulance routes rarely use the freeways Caltrans covers. At 4× slowdown, most SF cameras affect 0 to 14 calls a week; SR-1 near the Presidio Tunnel is the clearest case (2 calls switched, about 128 s saved each). Camera value is mostly a live-demo story, not a measurable weekly gain.
 
 ## Agent context
 
