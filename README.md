@@ -1,4 +1,4 @@
-# DispatchZero
+<h1 align="center"><img src="docs/logo.png" alt="DispatchZero" width="480"></h1>
 
 **An operating system for emergency response that teaches itself to make every neighborhood equally fast.**
 

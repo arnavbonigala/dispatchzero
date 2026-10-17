@@ -314,9 +314,9 @@ export default function App() {
       <div className="left">
         <header className="top glass">
           <div className="brand">
-            <span className="logo" aria-hidden="true" />
+            <img className="logo" src="/mark.png" alt="" width="34" height="34" />
             <div>
-              <h1>DispatchZero</h1>
+              <h1>Dispatch<span className="zero">Zero</span></h1>
               <p>
                 Real SF 911 calls from a week the AI never saw
                 {learned && <> · last learned {dayLabel(learned.last_learned)}</>}
