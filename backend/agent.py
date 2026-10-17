@@ -18,15 +18,17 @@ SIM_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
 
+MOVE_HINTS = """Big rewrites overfit the training weeks and slow the rest of the city. Prefer small, targeted changes to the current best.
+A known working idea: move about 3 spare units from the biggest downtown posts to posts in the slow neighborhoods, leaving everyone else alone.
+Moving 4 or more units looks free on training but slows everyone on busier weeks. Keep at most 3 units moved at once and at least 2 units at each downtown post. Look for gains in when units move (time buckets in post_plan) or in choose_unit, not in moving more units.
+
+"""
+
 SYSTEM = """You improve an ambulance dispatch policy for San Francisco, tested in a simulator that replays real 911 calls.
 
 Goal: make the 10 slowest neighborhoods faster (their median response time) without making the citywide median more than 5 s slower than baseline.
 Your candidate must beat the current best on the training weeks, then pass the same test on a holdout week you never see.
-Big rewrites overfit the training weeks and slow the rest of the city. Prefer small, targeted changes to the current best.
-A known working idea: move about 3 spare units from the biggest downtown posts to posts in the slow neighborhoods, leaving everyone else alone.
-Moving 4 or more units looks free on training but slows everyone on busier weeks. Keep at most 3 units moved at once and at least 2 units at each downtown post. Look for gains in when units move (time buckets in post_plan) or in choose_unit, not in moving more units.
-
-You control two functions in one Python file:
+{hints}You control two functions in one Python file:
 
 {contract}
 
@@ -63,7 +65,7 @@ ENGINE_NOTE = """Engine mode: the score is the time until the first paramedic is
 
 def send_engine(call, engines, eta, ambulance_s) -> str | None
 
-`engines` lists idle paramedic fire engines as {{unit_id, post, kind: "engine"}}; `eta(engine, call)` is that engine's seconds from dispatch to scene; `ambulance_s` is the chosen ambulance's seconds from dispatch to scene. Return an engine id to send it, or None. Injected globals: `ENGINES` (engine to its station post) and `ENGINE_LOAD` ("E01|15": that engine's own fire and other dispatches per day in that hour). Without send_engine, an engine goes only when history sent one. A sent engine is busy for about 10 minutes on scene, so it can miss its own fire calls: `stats.engine_conflicts` counts real engine calls that start while your policy has that engine busy, and a candidate with more than twice the baseline's conflicts is rejected.
+`engines` lists idle paramedic fire engines as {unit_id, post, kind: "engine"}; `eta(engine, call)` is that engine's seconds from dispatch to scene; `ambulance_s` is the chosen ambulance's seconds from dispatch to scene. Return an engine id to send it, or None. Injected globals: `ENGINES` (engine to its station post) and `ENGINE_LOAD` ("E01|15": that engine's own fire and other dispatches per day in that hour). Without send_engine, an engine goes only when history sent one. A sent engine is busy for about 10 minutes on scene, so it can miss its own fire calls: `stats.engine_conflicts` counts real engine calls that start while your policy has that engine busy, and a candidate with more than twice the baseline's conflicts is rejected.
 
 """
 
@@ -167,7 +169,7 @@ def step(model):
     name = next_name()
     row = {"version": name, "parent": best, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
     try:
-        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else ""), model))
+        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS), model))
         (POLICIES / f"{name}.py").write_text(code)
         train = evaluate(name, "train")
         row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"]}

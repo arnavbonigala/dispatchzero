@@ -455,6 +455,8 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
                 "engine_s": None if engine_resp is None else round(engine_resp, 1),
                 "historical_first_s": min(c["historical_s"], hist_e) if hist_e == hist_e and hist_e is not None else c["historical_s"],
             }
+            if trace:
+                extra["closest_idle_engine_s"] = round(min((world.engine_drive(world.engines[u], node, c["hour"], c["nbhd"]) for u in idle_e), default=float("nan")), 1)
             if engine_resp is not None:
                 response = min(response, engine_resp)
         results.append({
@@ -544,7 +546,7 @@ def worst_calls(world, calls, policy, n=50, engines=False):
         r["bucket"] = BUCKET_OF[r["hour"]]
         r["avoidable_s"] = round(max(r["controllable_s"] - r["closest_post_drive_s"], 0), 1)
     worst = sorted(results, key=lambda r: -(r["response_s"] - r["processing_s"] if engines else r["controllable_s"]))[:n]
-    keep = (["response_s", "ambulance_s", "engine_unit", "engine_s"] if engines else []) + ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
+    keep = (["response_s", "ambulance_s", "engine_unit", "engine_s", "closest_idle_engine_s"] if engines else []) + ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
             "closest_post", "closest_post_area", "closest_post_drive_s", "units_at_closest_post", "n_idle", "n_on_duty"]
     calls_by_id = {c["call_id"]: c for c in calls}
     rows = [{k: (calls_by_id[r["call_id"]].get(k) if k == "station_area" else r.get(k)) for k in keep} for r in worst]
