@@ -1,20 +1,22 @@
-# Golden Minute
+# DispatchZero
 
 **An operating system for emergency response that teaches itself to make every neighborhood equally fast.**
 
-Golden Minute is a self-learning dispatcher for San Francisco's ambulances and paramedic fire engines. An AI agent writes the city's dispatch playbook as code, replays real 911 history through a calibrated digital twin of the city, studies its slowest responses, and rewrites itself. A new rule ships only after it wins on weeks it studied and again on a week it has never seen. Live Caltrans traffic cameras feed what is happening on the road right now into every dispatch.
+DispatchZero is a self-learning dispatcher for San Francisco's ambulances and paramedic fire engines. An AI agent writes the city's dispatch playbook as code, replays real 911 history through a calibrated digital twin of the city, studies its slowest responses and rewrites itself. A new rule ships only after it wins on the weeks it studied and again on a week it has never seen. Live Caltrans traffic cameras feed the state of the road into every dispatch.
 
-Track: **New Operating System for the Physical World.**
+**Track:** New Operating System for the Physical World
 
-## The problem: your zip code sets your wait
+![Time to the first paramedic on scene, standard dispatch vs DispatchZero](docs/charts/headline.png)
 
-In a cardiac arrest, survival falls about 10% for every minute without care. In San Francisco, the 10 slowest neighborhoods wait a median of 10:00 for the first paramedic, and neighborhood medians spread 1:19 apart. Golden Minute closes that gap and makes the whole city faster at the same time.
+## The problem: your neighborhood sets your wait
+
+In a cardiac arrest, survival falls about 10% for every minute without care. In San Francisco, the 10 slowest neighborhoods wait a median of 10:00 for the first paramedic, and neighborhood medians sit 1:19 apart. DispatchZero closes that gap and makes the whole city faster at the same time.
 
 ## Results
 
-A real week of SF 911 medical calls (1,708 calls) the AI never saw, replayed with the city's standard dispatch and with Golden Minute's learned playbook, in the same calibrated simulator. Time is to the first paramedic on scene.
+1,708 real SF 911 medical calls from a week the AI never saw, replayed with the city's standard dispatch and with DispatchZero's learned playbook in the same calibrated digital twin. Time is measured to the first paramedic on scene.
 
-| | Standard dispatch | Golden Minute | Change |
+| | Standard dispatch | DispatchZero | Change |
 |---|---|---|---|
 | Average, whole city | 9:57 | 8:33 | **1:24 faster** |
 | Median, 10 slowest neighborhoods | 10:00 | 7:20 | **2:41 faster** (95% CI 2:10 to 3:20) |
@@ -23,7 +25,21 @@ A real week of SF 911 medical calls (1,708 calls) the AI never saw, replayed wit
 | Calls reached within 8 minutes | 38% | 54% | **+16 points** |
 | Gap between neighborhoods (std. dev. of medians) | 1:19 | 0:42 | **46% more equal** |
 
-The neighborhoods that waited longest gain twice as much as the city as a whole, so the city gets faster and fairer at once.
+### Faster and fairer
+
+The neighborhoods that waited longest gain the most: Outer Richmond 4:03, Haight Ashbury 3:51, Excelsior 3:41, Sunset/Parkside 3:17.
+
+![Median time to first paramedic by neighborhood, standard dispatch vs DispatchZero](docs/charts/equity_map.png)
+
+![The 10 slowest neighborhoods before and after](docs/charts/equity_neighborhoods.png)
+
+![Share of calls reached over time, with the 8-minute mark](docs/charts/distribution.png)
+
+### The agent teaches itself
+
+39 rules written, tested and explained by the agent; 10 passed every gate and were kept. Each kept rule beat the best so far on the training weeks and beat standard dispatch on a held-out week.
+
+![Learning curve: training-week average for every rule the agent wrote](docs/charts/learning_curve.png)
 
 ## How it works
 
@@ -69,25 +85,47 @@ flowchart LR
 4. **Act.** The best policy dispatches any incident you click on the live map, against the current state of every unit, and explains its choice in plain English.
 5. **Repeat daily.** `daily.py` fetches yesterday's calls, re-checks calibration, re-scores every kept rule and runs new learning rounds.
 
+## Data sources
+
+| Source | Provider | What DispatchZero uses | Volume |
+|---|---|---|---|
+| [Fire Department Calls for Service](https://data.sfgov.org/d/nuek-vuh3) | DataSF | Every ambulance and engine dispatch: times from call to on scene to available, location, priority, call type | 8,607 ambulance calls, 10,668 ambulance dispatches, 9,998 paramedic-engine dispatches over 5 weeks |
+| [Ambulance patient offload times](https://data.sfgov.org/d/6x9q-izga) | DataSF | Hospital handoff time per hospital | 11 hospitals |
+| [Neighborhood demographics, ACS 2019 to 2023](https://data.sfgov.org/d/4qbq-hvtt) | DataSF | Population and share of residents 65+ | 41 neighborhoods |
+| [OpenStreetMap](https://www.openstreetmap.org) drive network | OSM via osmnx | Every drivable road with speed limits, for routing and drive times | 10,033 intersections |
+| [OpenStreetMap](https://www.openstreetmap.org) hospitals | OSM | Emergency hospitals where transports end | 11 hospitals |
+| [Historical weather](https://open-meteo.com/en/docs/historical-weather-api) | Open-Meteo | Hourly rain and temperature for demand forecasting | 840 hours |
+| [District 4 CCTV](https://cwwp2.dot.ca.gov/data/d4/cctv/cctvStatusD04.json) | Caltrans | Live freeway video, read by YOLOv8 vehicle tracking | 33 San Francisco cameras |
+| [Analysis Neighborhoods](https://data.sfgov.org/d/j2bu-swwd) | DataSF | Neighborhood boundaries for every call and the maps | 41 neighborhoods |
+
+Built from those sources:
+
+| Model | What it learns | Size |
+|---|---|---|
+| Drive-time model | Gradient boosting on real ambulance drives | 5,165 drives, error 253 s to 197 s |
+| Demand forecast | Poisson regression on neighborhood, hour, weekend, heat and rain | 34,440 neighborhood-hours |
+| Road speeds | Speed multiplier per neighborhood and time of day | about 200 cells |
+| Engine workload | Each engine's typical runs per hour of day | 34 engines × 24 hours |
+
 ## What made this hard
 
-**A digital twin with no GPS feed.** SF publishes no ambulance locations. We rebuilt the fleet from the dispatch record itself: posts from where calls happen, a home post for each of 57 ambulances, real shifts, real busy times, queueing, relocation drives, and patients delivered to the actual hospital. 34 paramedic engines stay busy with their 9,998 real fire and medical runs. The twin matches SF's real median response within 1.0% on the weeks it was fit to and 0.9% on the frozen week; first-paramedic times match 550 s vs 548 s and 557 s vs 560 s.
+**A digital twin with no GPS feed.** SF publishes no ambulance locations, so DispatchZero rebuilds the fleet from the dispatch record: posts from where calls happen, a home post for each of 57 ambulances, real shifts and busy times, queueing, relocation drives, and patients delivered to the actual hospital. 34 paramedic engines stay busy with their 9,998 real runs. The twin matches SF's real median response within 1.0% on the weeks it was fit to and 0.9% on the frozen week.
 
-**Learned drive times.** A gradient-boosted model trained on 5,165 real ambulance drives (road time, distance, hour, weekday, neighborhood, post and coordinates) cut drive-time error from 253 s to 197 s on a held-out week. It replaced the formula only after winning that test, and the twin is re-calibrated on top of it. The full call-by-post prediction matrix is precomputed, so scoring a candidate stays fast.
+![Digital twin vs real SF response times by hour](docs/charts/calibration.png)
 
-**Letting an AI write code that runs a city service, safely.** Every AI-written policy is parsed and checked before it loads (allow-listed imports and functions only, no file access, no `eval`, no reflection), then runs in its own process under a macOS sandbox with no network and a timeout. The policy only records its decisions; the parent replays them through its own simulator, so every score comes from trusted code.
+**Learned drive times.** A gradient-boosted model trained on 5,165 real ambulance drives cut drive-time error from 253 s to 197 s on a held-out week, and the twin is re-calibrated on top of it. Every call-to-post prediction is precomputed, so scoring a candidate rule stays fast.
 
-**An agent that cannot fool itself.** Three time splits: the agent learns from three weeks, a fourth week is a pass/fail gate it never sees the numbers of, and the fifth week is frozen until the final headline. Each round writes four candidates in parallel from different angles (which engine to send, where ambulances wait, which ambulance to send, all combined). A second model reviews each candidate and can veto it, and a lessons notebook carries what worked and what failed into the next round. 39 rules written and tested, 10 kept. Every result is a paired comparison with bootstrap 95% confidence intervals.
+**AI-written code running a city service, safely.** Every policy the agent writes is parsed and checked before it loads (allow-listed imports, no file access, no `eval`, no reflection), then runs in its own process under a macOS sandbox with no network and a timeout. The policy only records its decisions; the parent replays them through its own simulator, so every score comes from trusted code.
 
-**The agent found the lever itself.** SF sends a fire engine to 43% of medical calls, yet its 34 paramedic engines usually beat the ambulance when they go. The agent learned when to add an engine, neighborhood by neighborhood, hour by hour, weighted by each engine's own workload, with life-threatening calls counting double. Its kept rules read like a dispatcher's notes, for example: *"Chinatown at hour 10 and Tenderloin and South of Market at midday show ambulances taking 800 to 1300 s while an idle engine is 200 to 450 s away."*
+**An agent that cannot fool itself.** The agent studies three weeks, a fourth week is a pass/fail gate whose numbers it never sees, and the fifth week stays sealed until the final result. Each round writes four candidates in parallel from different angles, a second model reviews each one and can veto it, and a lessons notebook carries what worked into the next round. Every result is a paired comparison with bootstrap 95% confidence intervals.
 
-**Computer vision in the dispatch loop.** `cameras.py` pulls live Caltrans HLS video, tracks vehicles across each clip with YOLOv8, and turns their count and motion into a slowdown factor. That factor slows the matching freeway segments in the road graph, every unit's drive time is recomputed, and live dispatch says when a jam changed its choice: *"Cameras show US-101 : 17th Street at 3.5x normal travel time. Without the cameras this dispatcher would send M517; it sends M521 instead, about 72 s sooner."*
+**The agent found the lever itself.** SF's 34 paramedic engines beat the ambulance about 75% of the time when they go. The agent learned when to add one, by neighborhood, hour and each engine's own workload, with life-threatening calls counting double. Its rules read like a dispatcher's notes: *"Chinatown at hour 10 and Tenderloin and South of Market at midday show ambulances taking 800 to 1300 s while an idle engine is 200 to 450 s away."*
 
-**Nine live and historical data sources fused into one model.** 8,607 ambulance calls, 10,668 ambulance dispatches, 9,998 paramedic-engine dispatches, a 10,033-intersection road graph, 840 hours of weather, 41 neighborhoods of census data, 11 hospitals' handoff times, a 34,440-cell demand forecast, and 33 live cameras.
+**Computer vision in the dispatch loop.** `cameras.py` pulls live Caltrans video, tracks vehicles with YOLOv8, and turns their count and motion into a slowdown on the matching freeway roads. Live dispatch recomputes every unit's drive time and says when a jam changed its choice: *"Cameras show US-101 : 17th Street at 3.5x normal travel time. Without the cameras this dispatcher would send M517; it sends M521 instead, about 72 s sooner."*
 
 ## Why it is a new operating system for the physical world
 
-Emergency dispatch runs on fixed, hand-written rules. Golden Minute turns it into a closed loop: it senses the city through public data and cameras, keeps a calibrated model of every unit, writes its own improvements, proves them on unseen data before they act, and explains every decision to the human in charge. The same loop works for any city that publishes its 911 data.
+Emergency dispatch runs on fixed, hand-written rules. DispatchZero turns it into a closed loop: it senses the city through public data and live cameras, keeps a calibrated model of every unit, writes its own improvements, proves them on unseen data before they act, and explains every decision to the dispatcher in charge. The same loop runs for any city that publishes its 911 data.
 
 ## Reproduce
 
@@ -105,8 +143,8 @@ cd frontend && npm install && npm run dev
 .venv/bin/python backend/agent.py --engines --headline
 ```
 
-`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, paramedic-engine dispatches, weather, neighborhood data, hospital handoff times, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph. `backend/cameras.py --once` takes a live camera reading.
+`fetch.py` downloads the last 5 full weeks of SF ambulance calls (weeks 1 to 3 train, week 4 holdout, week 5 frozen), ambulance posts, unit home posts, paramedic-engine dispatches, weather, neighborhood data, hospital handoff times, SF Caltrans cameras, and the OpenStreetMap road graph into `data/` (gitignored). Pass `--skip-graph` to skip the road graph. `backend/cameras.py --once` takes a live camera reading. `backend/charts.py` regenerates every chart in this README from the scored results.
 
 ## Architecture
 
-The full technical reference (file layout, policy contract, simulator rules, calibration, learned models, cameras, engines, agent loop, forecast and API) is in [ARCHITECTURE.md](ARCHITECTURE.md).
+Diagrams of every component and the full technical reference (simulator, policy contract and sandbox, learned models, agent loop, cameras, live dispatch, API) are in [ARCHITECTURE.md](ARCHITECTURE.md).
