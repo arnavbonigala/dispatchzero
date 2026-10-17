@@ -78,6 +78,14 @@ def choose_unit(call: dict, idle: list[dict], eta) -> str              # eta(uni
 - **Calibration:** pick a `city_factor` per hour-of-day bucket so that the baseline policy's sim median matches the actual historical median on the training weeks. Report the calibration error on screen.
 - Baseline policy = every unit at its historically most-frequent station area; send the closest idle unit.
 
+**Learned road speeds (A, stretch after the 1:30 checkpoint)**
+- Why: the fastest route is already exact once road speeds are known, so better routes come from better speeds. Speed limits times one citywide factor misses patterns like "the Mission at 5pm is 40% slower than posted."
+- Signal: actual drive time = `on_scene_dttm − response_dttm` for each training call. Predicted drive time = the route time from the unit's usual post to the scene. SF publishes no GPS tracks, so speeds are learned per area, not per street.
+- Model: one speed factor per (neighborhood × hour bucket). Hour buckets: night, morning rush, midday, evening rush, evening. Factor = median of actual ÷ predicted over that cell's calls, shrunk toward the citywide factor when the cell has fewer than 30 calls.
+- Applied to: every edge whose midpoint falls in that neighborhood, alongside the camera slowdown (`edge time × area factor × camera slowdown`).
+- Adopt only if it helps: compare the median absolute error of predicted vs actual drive time on the frozen week. Keep the learned factors only if the error drops, and report both numbers on screen.
+- UI: a heatmap layer (neighborhood colored by its factor at the selected hour) next to the camera markers.
+
 **Agent (`agent.py`)**
 1. Run the current best on training weeks and collect the summary plus the 50 worst calls, each with context (hour, neighborhood, which unit went, from where, nearest idle unit and its ETA).
 2. Prompt Claude (latest Sonnet for speed) with the current policy code, the summary, the worst calls, and the last 5 diagnoses from `versions.jsonl`. It returns a diagnosis plus the full new policy file.
@@ -116,7 +124,7 @@ Each person runs Claude Code agents in parallel on sub-pieces. C starts before t
 |---|---|---|---|---|
 | 0:00–0:20 | Together: freeze the contracts, repo skeleton, `fetch.py` starts downloading | | | Contracts committed |
 | 0:20–1:30 | `fetch.py` done; `sim.py` with baseline policy; calibration | `cameras.py` reads 1 Caltrans HLS stream → YOLO counts and `moving_frac` | `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`; FastAPI serving fixture JSON | **1:30 go/no-go:** baseline sim median within 10% of actual, otherwise switch to straight-line × factor |
-| 1:30–2:45 | Sim speed-up (cached post Dijkstras), `--self-check`, worst-50 context for the agent | 10 cameras live, slowdown formula, React map + replay from fixtures, camera markers | Swap stub for real `sim.py`; first 3 real iterations; tune the prompt on real diagnoses | At least one accepted version beats baseline on the frozen week |
+| 1:30–2:45 | Sim speed-up (cached post Dijkstras), `--self-check`, worst-50 context for the agent; **stretch:** learned road speeds (skip if calibration missed the checkpoint) | 10 cameras live, slowdown formula, React map + replay from fixtures, camera markers | Swap stub for real `sim.py`; first 3 real iterations; tune the prompt on real diagnoses | At least one accepted version beats baseline on the frozen week |
 | 2:45–3:45 | Wire `edge_slowdowns()` into sim; with/without-jam test | Record rush-hour jam clips + replay mode; wire UI to real API; "dispatch now" panel | 6–10 iterations in the background; version chart + diagnosis feed; draft pitch with real numbers | Full loop visible in the UI |
 | 3:45–4:30 | Freeze the policy version. Rehearse together, fix the flakiest piece, cut whatever isn't working (cameras first) | | | Demo runs 3 times cleanly |
 | 4:30–5:00 | README | Backup video | Final pitch | Submitted |
@@ -138,6 +146,7 @@ Each person runs Claude Code agents in parallel on sub-pieces. C starts before t
 | A Caltrans HLS stream fails | Poll the 5s JPEG snapshots (count only), or use recorded clips |
 | YOLO is slow on the laptop | YOLOv8n at 640px, 3s clips, 10 cameras, sequential |
 | Claude writes a broken policy | Subprocess plus timeout plus automatic rejection; it never touches the frozen week |
+| Learned speeds don't lower frozen-week error | Keep the per-hour citywide factor and drop the heatmap; nothing else depends on it |
 
 ## Verification
 
@@ -146,5 +155,6 @@ Each person runs Claude Code agents in parallel on sub-pieces. C starts before t
 - `python backend/sim.py --self-check`: asserts on a 3-call hand-made scenario (closest unit chosen, busy unit skipped, slowdown increases ETA).
 - `python backend/agent.py --iters 3`: `versions.jsonl` grows, and at least one version is accepted.
 - `python backend/cameras.py --once`: prints a reading for each of 10 cameras with a vehicle count above 0 for daytime feeds.
+- `python backend/sim.py --fit-speeds`: prints drive-time error on the frozen week with the citywide factor vs learned factors; learned factors are saved only if the error is lower.
 - With/without-jam test: the same calls, with one camera forced to `slowdown=4`; affected calls reroute and ETAs change.
 - UI: open the app, watch the replay, click a camera, see the version chart. Take Playwright screenshots at 390px and 1440px.
