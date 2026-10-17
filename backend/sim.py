@@ -178,6 +178,7 @@ def load_policy(policy, world):
     mod.DEMAND = {b: dict(d) for b, d in world.demand().items()}
     mod.POST_DRIVE = [[round(float(world.travel[a, n]), 1) for n in world.post_nodes] for a in range(len(world.post_nodes))]
     mod.BUCKET_OF = dict(BUCKET_OF)
+    mod.ENGINES = dict(world.engines)
     spec.loader.exec_module(mod)
     return mod
 
@@ -196,6 +197,10 @@ class World:
         self.posts = list(posts)
         self.rel = rel or {}
         self.end_nodes = end_nodes or {}
+        self.engines = {}
+        self.engine_background = []
+        self.engine_offsets = {b: 0.0 for b in BUCKETS}
+        self.engine_on_scene = 0.0
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -206,7 +211,7 @@ class World:
         dispatches = pd.read_parquet(DATA / "dispatches.parquet")
         post_nodes = roads.nearest([p["lat"] for p in posts], [p["lon"] for p in posts])
         call_nodes = dict(zip(calls["call_id"], roads.nearest(calls["lat"], calls["lon"])))
-        hospitals = json.loads((DATA / "hospitals.json").read_text())
+        hospitals = [h for h in json.loads((DATA / "hospitals.json").read_text()) if h.get("general", True)]
         h_xy = xy([h["lat"] for h in hospitals], [h["lon"] for h in hospitals])
         h_nodes = roads.nearest([h["lat"] for h in hospitals], [h["lon"] for h in hospitals])
         nearest_h = np.linalg.norm(xy(calls["lat"], calls["lon"])[:, None, :] - h_xy[None, :, :], axis=2).argmin(axis=1)
@@ -221,6 +226,14 @@ class World:
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
+        if (DATA / "engines.json").exists():
+            ej = json.loads((DATA / "engines.json").read_text())
+            world.engines = {e["unit_id"]: e["post"] for e in ej["engines"]}
+            world.engine_on_scene = ej["on_scene_s"]
+            ed = pd.read_parquet(DATA / "engine_dispatches.parquet")
+            ed = ed[~ed["simulated"]]
+            world.engine_background = sorted(zip(epoch(ed["start"]), epoch(ed["end"]), ed["unit_id"]))
+            world.engine_offsets = fit_engine_offsets(world)
         return world
 
     def demand(self):
@@ -242,13 +255,27 @@ class World:
     def return_drive(self, post, node, hour, nbhd=None):
         return float(self.back[post, node]) * self.mult(hour, nbhd)
 
+    def engine_drive(self, post, node, hour, nbhd=None):
+        return float(self.travel[post, node]) * self.mult(hour, nbhd) + self.engine_offsets[BUCKET_OF[hour]]
+
     def move_time(self, a, b, hour):
         return float(self.travel[a, self.post_nodes[b]])
+
+
+def fit_engine_offsets(world):
+    gaps = {b: [] for b in BUCKETS}
+    for c in load_calls("fit"):
+        u = c.get("engine_unit")
+        if u in world.engines and c["engine_s"] == c["engine_s"]:
+            raw = float(world.travel[world.engines[u], world.call_nodes[c["call_id"]]]) * world.mult(c["hour"], c["nbhd"])
+            gaps[BUCKET_OF[c["hour"]]].append(c["engine_s"] - c["processing_s"] - raw)
+    return {b: float(statistics.median(g)) if g else 0.0 for b, g in gaps.items()}
 
 
 def make_eta(world, nodes):
     travel = world.travel
     offsets = dict(world.offsets)
+    engine_offsets = dict(world.engine_offsets)
     rel = dict(world.rel)
     n_posts = len(world.post_nodes)
 
@@ -257,7 +284,8 @@ def make_eta(world, nodes):
         if not 0 <= post < n_posts:
             raise ValueError(f"no post {post}")
         b = BUCKET_OF[int(call["hour"])]
-        return float(travel[post, nodes[call["call_id"]]]) * rel.get(f"{call.get('nbhd')}|{b}", 1.0) + offsets[b]
+        off = engine_offsets if unit.get("kind") == "engine" else offsets
+        return float(travel[post, nodes[call["call_id"]]]) * rel.get(f"{call.get('nbhd')}|{b}", 1.0) + off[b]
 
     return eta
 
@@ -289,7 +317,7 @@ def load_calls(split=None):
     return calls.to_dict("records")
 
 
-def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_entry=False):
+def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_entry=False, engines=False):
     policy = load_policy(policy, world)
     n_posts = len(world.post_nodes)
     busy = {u: 0 for u in world.units}
@@ -299,6 +327,12 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
     current_hour = None
     results = []
     stats = {"queued": 0, "invalid_choice": 0, "policy_errors": 0, "relocations": 0}
+    if engines:
+        stats.update(engine_sends=0, engine_conflicts=0)
+        ebusy = {u: 0 for u in world.engines}
+        esim = dict(ebusy)
+        ebg = world.engine_background
+        ei = 0
     tokens = {}
     eta = make_eta(world, tokens)
     prev = dict(post)
@@ -379,6 +413,43 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
         busy[chosen] = start + c["turnout_s"] + drive + after
         prev[chosen] = int(np.argmin(world.travel[:, end]))
         arrive[chosen] = busy[chosen] + world.return_drive(post[chosen], end, c["hour"], c["nbhd"])
+        extra = {}
+        if engines:
+            while ei < len(ebg) and ebg[ei][0] <= t:
+                s, e, u = ebg[ei]
+                if esim.get(u, 0) > s:
+                    stats["engine_conflicts"] += 1
+                if u in ebusy:
+                    ebusy[u] = max(ebusy[u], e)
+                ei += 1
+            idle_e = [u for u in world.engines if ebusy[u] <= t]
+            sent = None
+            if hasattr(policy, "send_engine"):
+                try:
+                    sent = policy.send_engine(public, [{"unit_id": u, "post": world.engines[u], "kind": "engine"} for u in idle_e], eta, round(wait + c["turnout_s"] + drive, 1))
+                except Exception:
+                    stats["policy_errors"] += 1
+                    sent = None
+                if sent is not None and sent not in idle_e:
+                    stats["invalid_choice"] += 1
+                    sent = None
+            elif idle_e and c.get("engine_s") == c.get("engine_s") and c.get("engine_s") is not None:
+                sent = min(idle_e, key=lambda u: world.engine_drive(world.engines[u], node, c["hour"], c["nbhd"]))
+            engine_resp = None
+            if sent:
+                ed = world.engine_drive(world.engines[sent], node, c["hour"], c["nbhd"])
+                engine_resp = proc + ed
+                ebusy[sent] = esim[sent] = t + ed + world.engine_on_scene
+                stats["engine_sends"] += 1
+            hist_e = c.get("engine_s")
+            extra = {
+                "ambulance_s": round(response, 1),
+                "engine_unit": sent,
+                "engine_s": None if engine_resp is None else round(engine_resp, 1),
+                "historical_first_s": min(c["historical_s"], hist_e) if hist_e == hist_e and hist_e is not None else c["historical_s"],
+            }
+            if engine_resp is not None:
+                response = min(response, engine_resp)
         results.append({
             "call_id": c["call_id"],
             "t": c["t"],
@@ -393,6 +464,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_
             "nbhd": c["nbhd"],
             "wait_s": round(wait, 1),
             "historical_drive_s": c["drive_s"],
+            **extra,
             **(ctx if trace else {}),
         })
     return results, stats
@@ -655,6 +727,32 @@ def self_check():
     assert simulate(wc, ke, Home, dispatch_at_entry=True)[0][0]["response_s"] == 20 + 10 + 400
     assert simulate(wc, ke, Home)[0][0]["response_s"] == 60 + 10 + 400
 
+    we = world_()
+    we.engines = {"E1": 1}
+    we.engine_on_scene = 600.0
+    ec = [{**calls[0], "engine_s": 150.0}, {**calls[1], "engine_s": float("nan")}]
+    rd, sd = simulate(we, ec, Base, engines=True)
+    assert rd[0]["engine_unit"] == "E1" and rd[0]["response_s"] == 160 and rd[0]["ambulance_s"] == 170 and rd[0]["historical_first_s"] == 150, rd[0]
+    assert rd[1]["engine_unit"] is None and rd[1]["response_s"] == rd[1]["ambulance_s"] and sd["engine_sends"] == 1, rd[1]
+    assert "engine_s" not in simulate(we, ec, Base)[0][0]
+
+    class Engine(Base):
+        @staticmethod
+        def send_engine(call, engines, eta, ambulance_s):
+            assert engines[0]["kind"] == "engine" and eta(engines[0], call) == 100.0 and ambulance_s == 110.0
+            return engines[0]["unit_id"]
+
+    we.engine_background = [(int(epoch(["2026-01-01T12:02:00"])[0]), int(epoch(["2026-01-01T12:30:00"])[0]), "E1")]
+    re_, se = simulate(we, ec + [{**calls[2], "t": "2026-01-01T12:03:00"}], Engine, engines=True)
+    assert se["engine_sends"] == 1 and se["engine_conflicts"] == 1 and re_[1]["engine_unit"] is None, (re_, se)
+
+    class BadEngine(Base):
+        @staticmethod
+        def send_engine(call, engines, eta, ambulance_s):
+            return "E9"
+
+    assert simulate(we, ec[:1], BadEngine, engines=True)[1]["invalid_choice"] == 1
+
     class Bad(Base):
         @staticmethod
         def choose_unit(call, idle, eta):
@@ -791,6 +889,7 @@ def main():
     ap.add_argument("--fit-speeds", action="store_true")
     ap.add_argument("--offload-cap", type=float, metavar="MINUTES")
     ap.add_argument("--dispatch-at-entry", action="store_true")
+    ap.add_argument("--engines", action="store_true")
     ap.add_argument("--jam-test", metavar="CAMERA_ID")
     ap.add_argument("--slowdown", type=float, default=4.0)
     a = ap.parse_args()
@@ -819,9 +918,9 @@ def main():
         return
     calls = load_calls(a.split)
     if a.offload_cap is not None or a.dispatch_at_entry:
-        base, _ = simulate(world, calls, a.policy)
+        base, _ = simulate(world, calls, a.policy, engines=a.engines)
         cap = a.offload_cap * 60 if a.offload_cap is not None else None
-        capped, _ = simulate(world, calls, a.policy, offload_cap_s=cap, dispatch_at_entry=a.dispatch_at_entry)
+        capped, _ = simulate(world, calls, a.policy, offload_cap_s=cap, dispatch_at_entry=a.dispatch_at_entry, engines=a.engines)
         print(json.dumps({
             "offload_cap_min": a.offload_cap,
             "dispatch_at_entry": a.dispatch_at_entry,
@@ -839,14 +938,17 @@ def main():
         print(json.dumps(out, indent=1))
         return
     try:
-        results, stats = simulate(world, calls, a.policy)
+        results, stats = simulate(world, calls, a.policy, engines=a.engines)
     except PolicyRejected as e:
         raise SystemExit(f"rejected: {e}")
     summary = summarize(results, Path(a.policy).stem, a.split)
     summary["actual_median_s"] = statistics.median(r["historical_s"] for r in results)
+    if a.engines:
+        summary["actual_first_median_s"] = statistics.median(r["historical_first_s"] for r in results)
+        summary["ambulance_median_s"] = statistics.median(r["ambulance_s"] for r in results)
     summary["stats"] = stats
     if a.compare:
-        summary["vs_" + Path(a.compare).stem] = goal(results, simulate(world, calls, a.compare)[0])
+        summary["vs_" + Path(a.compare).stem] = goal(results, simulate(world, calls, a.compare, engines=a.engines)[0])
     if a.out:
         Path(a.out).write_text(json.dumps({"summary": summary, "results": results}))
     print(json.dumps(summary, indent=1))

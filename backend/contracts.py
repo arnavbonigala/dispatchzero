@@ -74,3 +74,4 @@ class CameraReading(TypedDict):
 Eta = Callable[[IdleUnit, Call], float]
 PostPlan = Callable[[int, list[str]], dict[str, int]]
 ChooseUnit = Callable[[Call, list[IdleUnit], Eta], str]
+SendEngine = Callable[[Call, list[IdleUnit], Eta, float], "str | None"]
