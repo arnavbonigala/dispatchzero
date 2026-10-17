@@ -10,11 +10,14 @@ import argparse
 import json
 import os
 import threading
+from datetime import datetime
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 import requests
+from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
 import sim
@@ -52,48 +55,76 @@ def hospitals():
     return hs, world().roads.nearest([h["lat"] for h in hs], [h["lon"] for h in hs])
 
 
+CAMERA_MAX_AGE_S = 30 * 60  # older readings describe traffic that has likely cleared
+SF_TZ = ZoneInfo("America/Los_Angeles")
+
+
 @lru_cache(4)
 def _camera_state(mtime):
     return camera_state(json.loads((sim.DATA / "camera_readings.json").read_text()))
 
 
+@lru_cache(1)
+def _edge_index():
+    r = world().roads
+    return {(int(u), int(v)): i for i, (u, v) in enumerate(zip(r.edge_u, r.edge_v))}
+
+
 def camera_state(rows):
     """Camera readings as road slowdowns and drive times from every post; None when no road is slowed."""
     cams = {c["camera_id"]: c for c in json.loads((sim.DATA / "cameras.json").read_text())}
-    # cameras.json supplies the route for readings saved before cameras.py recorded it
-    readings = [{**cams.get(r["camera_id"], {}), **{k: v for k, v in r.items() if v != ""}} for r in rows if isinstance(r, dict) and "camera_id" in r]
-    slowed = [r for r in readings if float(r.get("slowdown", 1.0)) > 1.0]
+    readings = []
+    for r in rows if isinstance(rows, list) else []:
+        try:
+            # cameras.json supplies the route for readings saved before cameras.py recorded it
+            r = {**cams.get(r["camera_id"], {}), **{k: v for k, v in r.items() if v not in ("", None)}}
+            r["slowdown"], r["lat"], r["lon"] = float(r["slowdown"]), float(r["lat"]), float(r["lon"])
+        except (KeyError, ValueError, TypeError, AttributeError):
+            continue
+        if r["slowdown"] > 1.0 and not r.get("source"):
+            readings.append(r)
     w = world()
-    slow = sim.edge_slowdowns(slowed, w.roads)
+    edge_cam = {}
+    for r in readings:
+        for e in sim.edge_slowdowns([r], w.roads):
+            if e not in edge_cam or r["slowdown"] > edge_cam[e]["slowdown"]:
+                edge_cam[e] = r
+    slow = {e: r["slowdown"] for e, r in edge_cam.items()}
     if not slow:
         return None
-    return {"slow": slow, "travel": w.roads.times(w.post_nodes, slow), "readings": slowed,
-            "ts": max((str(r.get("ts", "")) for r in readings), default="")}
+    return {"slow": slow, "edge_cam": edge_cam, "travel": w.roads.times(w.post_nodes, slow), "readings": readings,
+            "ts": max((str(r.get("ts", "")) for r in rows if isinstance(r, dict)), default="")}
 
 
-def camera_traffic():
+def reading_age_s(ts):
+    t = datetime.fromisoformat(ts)
+    t = t if t.tzinfo else t.replace(tzinfo=SF_TZ)
+    return (datetime.now(SF_TZ) - t).total_seconds()
+
+
+def camera_traffic(max_age_s=CAMERA_MAX_AGE_S):
+    """The latest cameras.py pass, or None when there is none, it is too old or it slows no road."""
     path = sim.DATA / "camera_readings.json"
     try:
-        return _camera_state(path.stat().st_mtime) if path.exists() else None
-    except (OSError, ValueError, KeyError, TypeError) as e:
+        cams = _camera_state(path.stat().st_mtime) if path.exists() else None
+        if cams and reading_age_s(cams["ts"]) > max_age_s:
+            return None
+        return cams
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         print(f"camera readings unusable: {e}")
         return None
 
 
-def camera_on_route(cams, route):
-    """The most slowed camera within camera range of a route's points, or None."""
-    pts = sim.xy([p[0] for p in route], [p[1] for p in route])
-    a, ab = pts[:-1], pts[1:] - pts[:-1]  # freeway segments are long, so measure to the segments, not their ends
-
-    def dist(r):
-        c = sim.xy([r["lat"]], [r["lon"]])[0]
-        if len(pts) < 2:
-            return float(np.linalg.norm(pts - c, axis=1).min())
-        t = np.clip(((c - a) * ab).sum(axis=1) / np.maximum((ab * ab).sum(axis=1), 1e-9), 0, 1)
-        return float(np.linalg.norm(a + t[:, None] * ab - c, axis=1).min())
-
-    near = [r for r in cams["readings"] if dist(r) <= sim.CAMERA_RADIUS_M]
-    return max(near, key=lambda r: float(r["slowdown"]), default=None)
+def camera_on_route(cams, src, dst):
+    """The most slowed camera whose freeway stretch the normal-roads route from src to dst drives through, or None."""
+    _, pred = dijkstra(world().roads._matrix(None), directed=True, indices=int(src), return_predecessors=True)
+    idx, cur, hit = _edge_index(), int(dst), []
+    while cur != int(src) and pred[cur] >= 0:
+        e = idx.get((int(pred[cur]), cur))
+        if e in cams["edge_cam"]:
+            hit.append(cams["edge_cam"][e])
+        cur = int(pred[cur])
+    return max(hit, key=lambda r: r["slowdown"], default=None)
 
 
 def google_key():
@@ -190,6 +221,10 @@ def probe_call(lat, lon, t, priority="3"):
     }
 
 
+def unit_post(idle, unit_id):
+    return next(u["post"] for u in idle if u["unit_id"] == unit_id)
+
+
 def post_ll(w, p):
     return [w.posts[p]["lat"], w.posts[p]["lon"]]
 
@@ -209,30 +244,42 @@ def decide(version, probe, cams=None):
     node = w.call_nodes[PROBE]
     sim_eta = {u["unit_id"]: eta(u, call) for u in idle}
     ranked = sorted(idle, key=lambda u: sim_eta[u["unit_id"]])[:CANDIDATES]
-    live = None if cams else google_drive_s([post_ll(w, u["post"]) for u in ranked], (probe["lat"], probe["lon"]))
+    live = google_drive_s([post_ll(w, u["post"]) for u in ranked], (probe["lat"], probe["lon"])) if google_key() else None
     offset = w.offsets[sim.BUCKET_OF[probe["hour"]]]
     camera_note = None
-    if cams:
-        # same model as the simulator's drive time, on roads slowed by the latest camera readings
-        mult = w.mult(probe["hour"], probe["nbhd"])
-        timed = {u["unit_id"]: float(cams["travel"][u["post"], node]) * mult + offset for u in idle}
-        try:
-            pick = rec.inner.choose_unit(call, idle, lambda u, c: timed[u["unit_id"]] if u.get("unit_id") in timed else eta(u, c))
-        except Exception:  # the simulator's rule for a failing policy: closest idle unit
-            pick = None
-        final = timed
-        blind = seen["pick"]
-        if pick in final and blind in final and blind != pick and final[blind] - final[pick] >= 1:
-            _, blind_route = w.roads.path(w.post_nodes[next(u["post"] for u in idle if u["unit_id"] == blind)], node)
-            cam = camera_on_route(cams, blind_route)
-            camera_note = {"blind_unit": blind, "blind_eta_s": round(final[blind], 1), "saved_s": round(final[blind] - final[pick], 1),
-                           "camera": cam["name"] if cam else None, "slowdown": float(cam["slowdown"]) if cam else None}
-    elif live:
+    if live:
         # Google's road time replaces ours for the closest candidates; keep the calibration offset so both sources stay comparable
         timed = {u["unit_id"]: live[i] + offset for i, u in enumerate(ranked) if i in live}
         eta_live = lambda u, c: timed.get(u["unit_id"], sim_eta[u["unit_id"]])
         pick = rec.inner.choose_unit(call, idle, eta_live)
         final = {u: timed.get(u, s) for u, s in sim_eta.items()}
+    elif cams:
+        # the simulator's own time (learned or road-based) plus the delay the camera-slowed roads add, as in sim --traffic
+        mult = w.mult(probe["hour"], probe["nbhd"])
+        n_posts = len(w.post_nodes)
+
+        def jam(post):
+            post = int(post)
+            if not 0 <= post < n_posts:
+                raise ValueError(f"no post {post}")
+            return float(cams["travel"][post, node] - w.travel[post, node]) * mult
+
+        def eta_cam(u, c):
+            base = eta(u, c)
+            return base + jam(u["post"]) if u.get("kind") != "engine" and c.get("call_id") == call["call_id"] else base
+
+        final = {u["unit_id"]: sim_eta[u["unit_id"]] + jam(u["post"]) for u in idle}
+        ranked = sorted(idle, key=lambda u: final[u["unit_id"]])[:CANDIDATES]
+        try:
+            pick = rec.inner.choose_unit(call, idle, eta_cam)
+        except Exception:  # the simulator's rule for a failing policy: closest idle unit
+            pick = None
+        blind = seen["pick"]
+        if pick in final and blind in final and blind != pick and final[blind] > sim_eta[blind] + 1 and final[blind] - final[pick] >= 1:
+            cam = camera_on_route(cams, w.post_nodes[unit_post(idle, blind)], node)
+            if cam:  # only credit the cameras when a slowed stretch is on the route the original pick would drive
+                camera_note = {"blind_unit": blind, "blind_eta_s": round(final[blind], 1), "saved_s": round(final[blind] - final[pick], 1),
+                               "camera": cam["name"], "slowdown": float(cam["slowdown"])}
     else:
         pick, final = seen["pick"], sim_eta
     if pick not in final:
@@ -332,8 +379,8 @@ def traffic_reason(side):
     note = side and "error" not in side and side.get("camera_note")
     if not note:
         return None
-    where = f"Cameras show {note['camera'].split('--')[-1].strip()} at {note['slowdown']:.1f}x normal travel time" if note["camera"] else "Cameras show freeway congestion"
-    return (f"{where}. Without them {note['blind_unit']} looked closest; sending {side['chosen']['unit_id']} instead, "
+    where = f"Cameras show {note['camera'].split('--')[-1].strip()} at {note['slowdown']:.1f}x normal travel time"
+    return (f"{where}. Without the cameras this dispatcher would send {note['blind_unit']}; it sends {side['chosen']['unit_id']} instead, "
             f"about {round(note['saved_s'])} s sooner.")
 
 
@@ -341,7 +388,7 @@ def dispatch(lat, lon, t, version=None, priority="3"):
     version = version or best_version()
     probe = probe_call(float(lat), float(lon), t, priority)
     w = world()
-    cams = None if google_key() else camera_traffic()
+    cams = camera_traffic()  # also the fallback when a Google request fails
     with _lock:  # the probe's road node lives on the shared world for the length of the replay
         w.call_nodes[PROBE] = int(w.roads.nearest([probe["lat"]], [probe["lon"]])[0])
         try:
@@ -356,10 +403,10 @@ def dispatch(lat, lon, t, version=None, priority="3"):
         "baseline": base,
         "agent": agent,
         "reason": explain(base, agent, probe["hour"]),
-        "traffic_reason": traffic_reason(agent) or traffic_reason(base),
+        "traffic_reason": traffic_reason(agent if agent else base),
         "hospital": hospital,
         "hospital_alternatives": alternatives,
-        "traffic": "google" if google_key() else "cameras" if cams else "osm",
+        "traffic": next((s["traffic"] for s in (agent, base) if s and "traffic" in s), "osm"),
         "cameras_ts": cams["ts"] if cams else None,
     }
 

@@ -4,6 +4,7 @@ import math
 import time
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import cv2
 import numpy as np
@@ -12,6 +13,7 @@ from fetch import fetch_cameras
 
 DATA = Path(__file__).parents[1] / "data"
 LOG = DATA / "camera_log.jsonl"  # every reading, appended, so the simulator can learn typical congestion by time of day
+SF_TZ = ZoneInfo("America/Los_Angeles")  # readings are bucketed by San Francisco hour wherever this runs
 TRACKER = Path(__file__).with_name("trackers.yaml")
 VEHICLES = [2, 3, 5, 7]  # COCO car, motorcycle, bus, truck
 CLIP_S = 3
@@ -107,7 +109,7 @@ def read_camera(cam, model, src=None):
         "lat": cam["lat"],
         "lon": cam["lon"],
         "route": cam.get("route", ""),
-        "ts": datetime.now().isoformat(timespec="seconds"),
+        "ts": datetime.now(SF_TZ).isoformat(timespec="seconds"),
         "vehicles": vehicles,
         "moving_frac": round(moving_frac, 2),
         "slowdown": round(slowdown(vehicles, moving_frac), 2),
@@ -122,11 +124,13 @@ def poll(cams, model, clips):
         except Exception as e:
             print(f"{cam['camera_id']}: skipped ({e})")
             continue
+        if cam["camera_id"] in clips:
+            r["source"] = "clip"  # a saved video, not today's traffic
         readings.append(r)
         print(f"{r['camera_id']:6} {r['vehicles']:3d} veh  moving {r['moving_frac']:.2f}  slowdown {r['slowdown']:.2f}  {r['name']}")
     (DATA / "camera_readings.json").write_text(json.dumps(readings, indent=1))
     with LOG.open("a") as f:
-        f.writelines(json.dumps(r) + "\n" for r in readings)
+        f.writelines(json.dumps(r) + "\n" for r in readings if not r.get("source"))
     return readings
 
 
@@ -141,12 +145,12 @@ def main():
     from ultralytics import YOLO
 
     model = YOLO("yolov8n.pt")
-    cams = [c for c in load_cameras() if c.get("stream")]  # some Caltrans cameras list no video link
+    clips = dict(args.clip)
+    cams = [c for c in load_cameras() if c.get("stream") or c["camera_id"] in clips]  # some Caltrans cameras list no video link
     if args.camera:
         cams = [c for c in cams if c["camera_id"] in args.camera]
     else:
         cams = busiest(cams, N_CAMERAS)
-    clips = dict(args.clip)
 
     while True:
         start = time.time()

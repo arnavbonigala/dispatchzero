@@ -17,7 +17,8 @@ PY = sys.executable
 HEADLINE = RUNS / "headline.json"
 PREFIX = "v"
 EXTRA = []
-TRAFFIC_ARGS = []  # ["--traffic"] scores every candidate with camera congestion
+TRAFFIC_ARGS = []  # ["--traffic", snapshot] scores every candidate on the same frozen camera profile
+TRAFFIC_SNAPSHOT = RUNS / "traffic_profile.json"
 SIM_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
@@ -101,7 +102,7 @@ def traffic_note():
     """System-prompt paragraph on camera congestion, or "" when traffic mode is off."""
     if not TRAFFIC_ARGS:
         return ""
-    prof = sim("--traffic-report")["buckets"]
+    prof = json.loads(TRAFFIC_SNAPSHOT.read_text())["buckets"]
     worst = "; ".join(f"{b}: " + ", ".join(f"{c['name'].split('--')[-1].strip()} {c['slowdown']}x" for c in cams[:4]) for b, cams in prof.items())
     return ("Traffic mode: drive times include typical freeway congestion per time bucket, measured by Caltrans cameras and a "
             "vision model, and `eta` already includes it. Injected global `TRAFFIC` maps a time bucket to the slowed cameras, "
@@ -324,7 +325,7 @@ def headline():
     out = {"version": best, "frozen": {k: s.get(k) for k in keys}, "baseline": {k: b.get(k) for k in keys}, "vs_baseline": s["vs_baseline"]}
     RUNS.mkdir(exist_ok=True)
     HEADLINE.write_text(json.dumps(out, indent=1))
-    if EXTRA:
+    if EXTRA and not TRAFFIC_ARGS:  # fixtures are the UI's normal-roads data
         snapshot(best)
     print(json.dumps(out, indent=1))
 
@@ -352,12 +353,16 @@ def main():
     ap.add_argument("--candidates", type=int, default=4)
     ap.add_argument("--traffic", action="store_true", help="score candidates with freeway congestion from the camera log")
     a = ap.parse_args()
-    if a.traffic:
-        global TRAFFIC_ARGS
-        TRAFFIC_ARGS = ["--traffic"]
+    global VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS, TRAFFIC_ARGS
     if a.engines:
-        global VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS
         VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS = RUNS / "engines.jsonl", RUNS / "engines_headline.json", "e", ["--engines"], RUNS / "lessons_engines.md"
+    if a.traffic:
+        # a separate experiment: its own history, headline and lessons, scored on one camera profile frozen now
+        VERSIONS, HEADLINE, LESSONS = (f.with_name(f"{f.stem}_traffic{f.suffix}") for f in (VERSIONS, HEADLINE, LESSONS))
+        if not (a.rescore or a.headline) or not TRAFFIC_SNAPSHOT.exists():
+            RUNS.mkdir(exist_ok=True)
+            TRAFFIC_SNAPSHOT.write_text(json.dumps(sim("--traffic-report"), indent=1))
+        TRAFFIC_ARGS = ["--traffic", str(TRAFFIC_SNAPSHOT)]
     if not history():
         seed()
     if a.rescore:

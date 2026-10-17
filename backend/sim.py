@@ -298,7 +298,8 @@ class Replay:
 def run_isolated(policy, split, world, calls, **sim_kwargs):
     """Simulate an agent-written policy without ever importing it here: the sandboxed child records its decisions
     and this process replays them, so every scored number comes from simulator code."""
-    child = {**sim_kwargs, "traffic": world.traffic_on}
+    # the child gets the parent's exact profile, so both replay the same roads even while cameras.py keeps logging
+    child = {**sim_kwargs, "traffic_profile": world.traffic_profile if world.traffic_on else None}
     return simulate(world, calls, Replay(record_decisions(policy, split, child)), **sim_kwargs)
 
 
@@ -372,7 +373,7 @@ def edge_slowdowns(readings, roads):
         f = float(r.get("slowdown", 1.0))
         if f <= 1.0:
             continue
-        route = r.get("route", "").replace("-", " ").replace("SR ", "CA ")
+        route = (r.get("route") or "").replace("-", " ").replace("SR ", "CA ")
         near = np.linalg.norm(mid - xy([r["lat"]], [r["lon"]]), axis=1) <= CAMERA_RADIUS_M
         for e in np.flatnonzero(near):
             if not route or route in refs[e]:
@@ -389,16 +390,17 @@ def traffic_profile(readings, min_n=TRAFFIC_MIN_READINGS):
             b = BUCKET_OF[int(str(r["ts"])[11:13])]
             f = float(r["slowdown"])
             float(r["lat"]), float(r["lon"])
-        except (KeyError, ValueError, TypeError):
+            cam = str(r["camera_id"])
+        except (KeyError, ValueError, TypeError, AttributeError):
             continue
-        if np.isfinite(f):
-            groups.setdefault((b, r["camera_id"]), []).append((f, r))
+        if np.isfinite(f) and not r.get("source"):  # readings replayed from saved clips never count
+            groups.setdefault((b, cam), []).append((f, r))
     out = {}
     for (b, cam), rows in sorted(groups.items()):
         med = float(statistics.median(f for f, _ in rows))
         if len(rows) >= min_n and med > 1.0:
             r = rows[-1][1]
-            out.setdefault(b, []).append({"camera_id": cam, "name": r.get("name", cam), "route": r.get("route", ""),
+            out.setdefault(b, []).append({"camera_id": cam, "name": str(r.get("name") or cam), "route": str(r.get("route") or ""),
                                           "lat": float(r["lat"]), "lon": float(r["lon"]), "slowdown": round(med, 2), "n": len(rows)})
     return out
 
@@ -492,6 +494,7 @@ class World:
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None, traffic=False):
+        """traffic: False, True (profile from data/camera_log.jsonl) or a profile dict from traffic_profile."""
         roads = roads or Roads()
         posts = json.loads((DATA / "posts.json").read_text())
         homes = json.loads((DATA / "units.json").read_text())
@@ -543,8 +546,8 @@ class World:
             days = (frozen - epoch([calls["t"].min()])[0]) / 86400
             hours = pd.to_datetime(fit["start"]).dt.hour
             world.engine_load = {f"{u}|{h}": round(n / days, 3) for (u, h), n in fit.groupby([fit["unit_id"], hours]).size().items()}
-        if traffic:
-            world.use_traffic(load_traffic(), slowdowns)
+        if traffic is not False and traffic is not None:
+            world.use_traffic(load_traffic() if traffic is True else traffic, slowdowns)
         return world
 
     def use_traffic(self, profile, slowdowns=None):
@@ -1325,6 +1328,9 @@ def self_check():
     prof = traffic_profile([reading(3.0, 17), reading(2.0, 17), reading(1.0, 17), reading(5.0, 12), reading("x", 17), {"camera_id": "bad"}])
     assert list(prof) == ["evening_rush"] and prof["evening_rush"][0]["slowdown"] == 2.0 and prof["evening_rush"][0]["n"] == 3, prof
     assert traffic_profile([reading(1.0, 17)] * 5) == {}
+    assert traffic_profile([{**reading(3.0, 17), "source": "clip"}] * 5) == {}
+    assert traffic_profile([{k: v for k, v in reading(3.0, 17).items() if k != "camera_id"}] * 5) == {}
+    assert edge_slowdowns([{**tv, "route": None, "slowdown": 2.0}], roads)
     tw = World(plain, plain, src, {}, {}, {}, [], {b: 0.0 for b in BUCKETS})
     tw.roads, tw.post_nodes = roads, src
     tw.use_traffic(prof)
@@ -1400,7 +1406,8 @@ def main():
     ap.add_argument("--engines", action="store_true")
     ap.add_argument("--jam-test", metavar="CAMERA_ID")
     ap.add_argument("--slowdown", type=float, default=4.0)
-    ap.add_argument("--traffic", action="store_true", help="add typical freeway congestion by time bucket from data/camera_log.jsonl")
+    ap.add_argument("--traffic", nargs="?", const=True, default=False, metavar="PROFILE_JSON",
+                    help="add typical freeway congestion by time bucket from data/camera_log.jsonl, or from a saved --traffic-report")
     ap.add_argument("--traffic-report", action="store_true", help="print the camera traffic profile and exit")
     ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--child-kwargs", default="{}", help=argparse.SUPPRESS)
@@ -1415,7 +1422,10 @@ def main():
         print(json.dumps({"log": str(CAMERA_LOG), "readings": n, "min_readings": TRAFFIC_MIN_READINGS,
                           "buckets": {b: sorted(cams, key=lambda c: -c["slowdown"]) for b, cams in prof.items()}}, indent=1))
         return
-    world = World.load(traffic=a.traffic)
+    if a.traffic is not False and (a.calibrate or a.fit_speeds or a.fit_eta or a.fixtures or a.jam_test):
+        raise SystemExit("--traffic only applies to scoring runs; calibration, fixtures and --jam-test use normal roads")
+    traffic = a.traffic if a.traffic is True or a.traffic is False else json.loads(Path(a.traffic).read_text())["buckets"]
+    world = World.load(traffic=traffic)
     if a.calibrate:
         calibrate(world)
         print(json.dumps(calibration_report(world), indent=1))
@@ -1475,7 +1485,7 @@ def main():
     if a.worst:
         if needs_isolation(a.policy):
             try:
-                out = worst_calls(world, calls, Replay(record_decisions(a.policy, a.split, {"engines": a.engines, "traffic": a.traffic})), a.worst, a.engines)
+                out = worst_calls(world, calls, Replay(record_decisions(a.policy, a.split, {"engines": a.engines, "traffic_profile": world.traffic_profile if world.traffic_on else None})), a.worst, a.engines)
             except PolicyRejected as e:
                 raise SystemExit(f"rejected: {e}")
             except SandboxUnavailable as e:
@@ -1495,7 +1505,7 @@ def main():
         summary["actual_first_median_s"] = statistics.median(r["historical_first_s"] for r in results)
         summary["ambulance_median_s"] = statistics.median(r["ambulance_s"] for r in results)
     summary["stats"] = stats
-    if a.traffic:
+    if world.traffic_on:
         summary["traffic"] = {b: len(cams) for b, cams in world.traffic_profile.items()}
     if a.compare:
         summary["vs_" + Path(a.compare).stem] = goal(results, compare)
@@ -1511,7 +1521,8 @@ def _json_default(o):
 def child_main(a):
     """Inside the sandbox: run one policy and write only its decisions for the parent to replay."""
     kwargs = json.loads(a.child_kwargs)
-    world = World.load(traffic=bool(kwargs.get("traffic")))
+    prof = kwargs.get("traffic_profile")
+    world = World.load(traffic=prof if isinstance(prof, dict) else False)
     calls = load_calls(a.split)
     rec = Recorder(load_policy(a.policy, world))
     simulate(world, calls, rec, **{k: kwargs[k] for k in ("offload_cap_s", "dispatch_at_entry", "engines") if k in kwargs})
