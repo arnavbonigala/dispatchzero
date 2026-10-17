@@ -102,81 +102,30 @@ def policy_path(version):
 # ---------------------------------------------------------------- evaluation (runs in a subprocess)
 
 
-class Recorder:
-    """Wraps a loaded policy and remembers who was idle and the closest idle unit for each call."""
-
-    def __init__(self, policy):
-        self.policy = policy
-        self.seen = {}
-
-    def post_plan(self, hour, units):
-        return self.policy.post_plan(hour, units)
-
-    def choose_unit(self, call, idle, eta):
-        try:
-            etas = [(eta(u, call), u["unit_id"], u["post"]) for u in idle]
-            best = min(etas)
-            self.seen[call["call_id"]] = {"idle": len(idle), "nearest_idle": best[1], "nearest_idle_post": best[2], "nearest_idle_eta_s": round(best[0], 1)}
-        except Exception:
-            pass
-        return self.policy.choose_unit(call, idle, eta)
-
-
 def evaluate(policy, splits):
     import sim
 
     world = sim.World.load()
     mod = sim.load_policy(policy, world)
-    posts = world.posts
     out = {}
     for split in splits:
         calls = sim.load_calls(split)
-        rec = Recorder(mod)
-        results, stats = sim.simulate(world, calls, rec)
-        summary = sim.summarize(results, Path(str(policy)).stem, split)
-        entry = {"summary": summary, "stats": stats}
+        results, stats = sim.simulate(world, calls, mod)
+        entry = {"summary": sim.summarize(results, Path(str(policy)).stem, split), "stats": stats}
         if split == "train":
-            entry["diagnostics"] = diagnostics(world, calls, results, rec.seen, posts)
+            entry["diagnostics"] = diagnostics(world, calls, results, mod)
         out[split] = entry
     return out
 
 
-def diagnostics(world, calls, results, seen, posts):
-    import pandas as pd
+def diagnostics(world, calls, results, mod):
+    import sim
 
-    by_id = {c["call_id"]: c for c in calls}
-    rows = []
-    for i, r in enumerate(results):
-        c = by_id[r["call_id"]]
-        rows.append({**r, "station_area": c["station_area"], "priority": c["priority"], **seen.get(f"call{i}", {"idle": 0})})
-    n_posts = len(world.post_nodes)
-
-    worst = []
-    for r in sorted(rows, key=lambda x: -x["response_s"])[:WORST_N]:
-        node = world.call_nodes[r["call_id"]]
-        closest = min(range(n_posts), key=lambda p: world.drive(p, node, r["hour"]))
-        ts = pd.Timestamp(r["t"])
-        worst.append({
-            "when": ts.strftime("%a %H:%M"),
-            "nbhd": r["nbhd"],
-            "area": r["station_area"],
-            "pri": r["priority"],
-            "unit": r["unit"],
-            "from_post": r["from_post"],
-            "from_area": posts[r["from_post"]]["station_area"],
-            "eta_s": round(r["eta_s"]),
-            "wait_s": round(r["wait_s"]),
-            "response_s": round(r["response_s"]),
-            "idle_units": r["idle"],
-            "nearest_idle": r.get("nearest_idle"),
-            "nearest_idle_eta_s": round(r["nearest_idle_eta_s"]) if "nearest_idle_eta_s" in r else None,
-            "closest_post": closest,
-            "closest_post_eta_s": round(world.drive(closest, node, r["hour"])),
-        })
+    area_of = {c["call_id"]: c["station_area"] for c in calls}
 
     def table(key):
         groups = defaultdict(list)
-        for r in rows:
+        for r in results:
             groups[key(r)].append(r)
         return {
             k: {
@@ -188,16 +137,20 @@ def diagnostics(world, calls, results, seen, posts):
             for k, g in sorted(groups.items())
         }
 
-    bucket_of = {h: b for b, hs in [("night", range(0, 7)), ("morning_rush", range(7, 10)), ("midday", range(10, 16)), ("evening_rush", range(16, 19)), ("evening", range(19, 24))] for h in hs}
     demand = defaultdict(lambda: defaultdict(int))
     for c in calls:
-        demand[c["station_area"]][bucket_of[c["hour"]]] += 1
+        demand[c["station_area"]][sim.BUCKET_OF[c["hour"]]] += 1
     days = len({c["t"][:10] for c in calls}) or 1
+    worst = sim.worst_calls(world, calls, mod, WORST_N)
 
     return {
-        "worst": worst,
+        "worst": worst["worst"],
+        "worst_by_nbhd": worst["worst_by_nbhd"],
+        "worst_by_bucket": worst["worst_by_bucket"],
+        "queued_in_worst": worst["queued_in_worst"],
+        "top_avoidable_nbhd_bucket_s": worst["top_avoidable_nbhd_bucket_s"],
         "by_hour": table(lambda r: r["hour"]),
-        "by_area": table(lambda r: r["station_area"]),
+        "by_area": table(lambda r: area_of[r["call_id"]]),
         "demand_per_day": {a: {b: round(n / days, 2) for b, n in d.items()} for a, d in sorted(demand.items())},
         "on_duty_by_hour": on_duty_by_hour(world, calls),
     }
@@ -255,11 +208,16 @@ def build_prompt(code, train, history, world_info):
         lines.append(f"- {h['version']} (parent {h['parent'] or '-'}), train median {h.get('train_median')}s, {verdict}: {h['diagnosis']}")
     lines += [
         "",
-        f"## The {WORST_N} slowest training calls under the current policy",
-        "Each row: when, neighborhood, station area, priority, unit sent, its post and that post's station area, drive",
-        "eta, time spent waiting for a free unit, total response, number of idle units at dispatch, the closest idle unit",
-        "and its eta, and the closest post of all to the call with its eta (if a unit had been waiting there).",
+        f"## The {WORST_N} training calls with the most controllable time (queue wait + drive) under the current policy",
+        "avoidable_s is how much of that a unit idle at the closest post would have saved. units_at_closest_post says",
+        "which units were based at that post and whether they were idle, busy or off duty at dispatch.",
         *(json.dumps(w) for w in d["worst"]),
+        "",
+        "## Where the worst calls cluster",
+        json.dumps({"by_nbhd": d["worst_by_nbhd"], "by_bucket": d["worst_by_bucket"], "queued_in_worst": d["queued_in_worst"]}),
+        "",
+        "## Top (neighborhood|bucket) cells by total avoidable seconds over all training calls",
+        json.dumps(d["top_avoidable_nbhd_bucket_s"]),
         "",
         "## Response by hour of day (training weeks)",
         json.dumps(d["by_hour"]),
