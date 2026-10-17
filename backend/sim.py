@@ -1,15 +1,18 @@
 import argparse
+import ast
 import bisect
 import importlib.util
 import json
+import random
 import statistics
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import dijkstra
+from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.spatial import cKDTree
+from scipy.stats import spearmanr
 
 ROOT = Path(__file__).parents[1]
 DATA = ROOT / "data"
@@ -18,12 +21,20 @@ POLICIES = Path(__file__).parent / "policies"
 
 BUCKETS = {"night": range(0, 7), "morning_rush": range(7, 10), "midday": range(10, 16), "evening_rush": range(16, 19), "evening": range(19, 24)}
 BUCKET_OF = {h: b for b, hs in BUCKETS.items() for h in hs}
+SPLITS = {"train": ["train"], "holdout": ["holdout"], "frozen": ["frozen"], "fit": ["train", "holdout"]}
 SHIFT_GAP_S = 6 * 3600
 SHIFT_LEAD_S = 3600
 MIN_ON_SCENE_S = 300
 FALLBACK_MPS = 8.0
 DETOUR = 1.3
-PUBLIC = ("call_id", "t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
+FREEWAY = {"motorway", "motorway_link"}
+PUBLIC = ("t", "lat", "lon", "hour", "nbhd", "station_area", "priority")
+ALLOWED_IMPORTS = {"math", "statistics", "collections", "itertools", "functools", "heapq", "bisect", "random"}
+BANNED_NAMES = {"open", "eval", "exec", "compile", "globals", "locals", "vars", "getattr", "setattr", "delattr", "__import__", "input", "breakpoint", "memoryview", "type", "object", "super"}
+
+
+class PolicyRejected(Exception):
+    pass
 
 
 def epoch(ts):
@@ -35,6 +46,22 @@ def xy(lat, lon):
     return np.column_stack([lon * 111320 * np.cos(np.radians(37.77)), lat * 110540])
 
 
+def check_source(src):
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            bad = [a.name for a in node.names if a.name.split(".")[0] not in ALLOWED_IMPORTS]
+        elif isinstance(node, ast.ImportFrom):
+            bad = [node.module] if (node.module or "").split(".")[0] not in ALLOWED_IMPORTS else []
+        elif isinstance(node, ast.Attribute):
+            bad = [node.attr] if node.attr.startswith("_") else []
+        elif isinstance(node, ast.Name):
+            bad = [node.id] if node.id in BANNED_NAMES or node.id.startswith("__") else []
+        else:
+            bad = []
+        if bad:
+            raise PolicyRejected(f"policy uses disallowed {bad[0]!r} (line {getattr(node, 'lineno', '?')})")
+
+
 class Roads:
     def __init__(self, path=DATA / "sf.graphml"):
         import osmnx as ox
@@ -44,9 +71,13 @@ class Roads:
         idx = {n: i for i, n in enumerate(nodes)}
         self.n = len(nodes)
         self.node_xy = xy([g.nodes[n]["y"] for n in nodes], [g.nodes[n]["x"] for n in nodes])
-        self.tree = cKDTree(self.node_xy)
         best = {}
+        street = np.zeros(self.n, bool)
         for u, v, d in g.edges(data=True):
+            hw = d.get("highway")
+            hw = set(hw) if isinstance(hw, list) else {hw}
+            if not hw <= FREEWAY:
+                street[idx[u]] = street[idx[v]] = True
             key = (idx[u], idx[v])
             t = float(d["travel_time"])
             if key not in best or t < best[key][0]:
@@ -57,21 +88,31 @@ class Roads:
         self.edge_t = np.array([best[e][0] for e in self.edges])
         self.edge_highway = [best[e][1] for e in self.edges]
         self.edge_ref = [best[e][2] for e in self.edges]
+        m = csr_matrix((self.edge_t, (self.edge_u, self.edge_v)), shape=(self.n, self.n))
+        _, label = connected_components(m, directed=True, connection="strong")
+        core = label == np.bincount(label).argmax()
+        self.snap_nodes = np.flatnonzero(core & street)
+        self.tree = cKDTree(self.node_xy[self.snap_nodes])
         self._cache = {}
 
     def nearest(self, lat, lon):
-        return self.tree.query(xy(lat, lon))[1]
+        return self.snap_nodes[self.tree.query(xy(lat, lon))[1]]
 
-    def times_from(self, sources, slowdowns=None):
-        key = (tuple(sources), tuple(sorted((slowdowns or {}).items())))
+    def _matrix(self, slowdowns, reverse=False):
+        w = self.edge_t.copy()
+        for e, f in (slowdowns or {}).items():
+            w[e] *= f
+        u, v = (self.edge_v, self.edge_u) if reverse else (self.edge_u, self.edge_v)
+        return csr_matrix((w, (u, v)), shape=(self.n, self.n))
+
+    def times(self, sources, slowdowns=None, reverse=False):
+        key = (tuple(int(s) for s in sources), tuple(sorted((slowdowns or {}).items())), reverse)
         if key not in self._cache:
-            w = self.edge_t.copy()
-            for e, f in (slowdowns or {}).items():
-                w[e] *= f
-            m = csr_matrix((w, (self.edge_u, self.edge_v)), shape=(self.n, self.n))
-            t = dijkstra(m, directed=True, indices=list(sources))
+            t = dijkstra(self._matrix(slowdowns, reverse), directed=True, indices=list(sources))
             straight = np.linalg.norm(self.node_xy[None, :, :] - self.node_xy[list(sources)][:, None, :], axis=2)
-            self._cache[key] = np.where(np.isfinite(t), t, straight * DETOUR / FALLBACK_MPS)
+            out = np.where(np.isfinite(t), t, straight * DETOUR / FALLBACK_MPS)
+            out.setflags(write=False)
+            self._cache[key] = out
         return self._cache[key]
 
 
@@ -96,19 +137,24 @@ def on_duty(windows, unit, t):
     return i >= 0 and t <= ends[i]
 
 
-def load_policy(policy):
-    if not isinstance(policy, str):
+def load_policy(policy, world):
+    if not isinstance(policy, (str, Path)):
         return policy
+    policy = str(policy)
     path = Path(policy) if policy.endswith(".py") else POLICIES / f"{policy}.py"
+    check_source(path.read_text())
     spec = importlib.util.spec_from_file_location(path.stem, path)
     mod = importlib.util.module_from_spec(spec)
+    mod.HOME = dict(world.homes)
+    mod.POSTS = [dict(p) for p in world.posts]
     spec.loader.exec_module(mod)
     return mod
 
 
 class World:
-    def __init__(self, travel, post_nodes, call_nodes, homes, windows, background, factors):
+    def __init__(self, travel, back, post_nodes, call_nodes, homes, windows, background, factors, posts=()):
         self.travel = travel
+        self.back = back
         self.post_nodes = post_nodes
         self.call_nodes = call_nodes
         self.homes = homes
@@ -116,6 +162,7 @@ class World:
         self.windows = windows
         self.background = background
         self.factors = factors
+        self.posts = list(posts)
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, factors=None):
@@ -128,15 +175,41 @@ class World:
         call_nodes = dict(zip(calls["call_id"], roads.nearest(calls["lat"], calls["lon"])))
         bg = dispatches[~dispatches["simulated"]]
         background = sorted(zip(epoch(bg["start"]), epoch(bg["end"]), bg["unit_id"]))
-        world = cls(roads.times_from(post_nodes, slowdowns), post_nodes, call_nodes, homes, shift_windows(dispatches), background, factors or load_factors())
+        world = cls(
+            roads.times(post_nodes, slowdowns),
+            roads.times(post_nodes, slowdowns, reverse=True),
+            post_nodes, call_nodes, homes, shift_windows(dispatches), background,
+            factors or load_factors(), posts,
+        )
         world.roads = roads
         return world
 
-    def eta(self, unit, call):
-        return float(self.travel[unit["post"], self.call_nodes[call["call_id"]]]) * self.factors[BUCKET_OF[call["hour"]]]
+    def drive(self, post, node, hour):
+        return float(self.travel[post, node]) * self.factors[BUCKET_OF[hour]]
+
+    def return_drive(self, post, node, hour):
+        return float(self.back[post, node]) * self.factors[BUCKET_OF[hour]]
 
     def move_time(self, a, b, hour):
-        return float(self.travel[a, self.post_nodes[b]]) * self.factors[BUCKET_OF[hour]]
+        return self.drive(a, self.post_nodes[b], hour)
+
+
+def make_eta(world, nodes):
+    travel = world.travel
+    factors = dict(world.factors)
+    n_posts = len(world.post_nodes)
+
+    def eta(unit, call):
+        post = int(unit["post"])
+        if not 0 <= post < n_posts:
+            raise ValueError(f"no post {post}")
+        return float(travel[post, nodes[call["call_id"]]]) * factors[BUCKET_OF[int(call["hour"])]]
+
+    return eta
+
+
+def valid_post(p, n):
+    return isinstance(p, (int, np.integer)) and not isinstance(p, bool) and 0 <= p < n
 
 
 def load_factors():
@@ -149,55 +222,71 @@ def load_factors():
 def load_calls(split=None):
     calls = pd.read_parquet(DATA / "calls.parquet")
     if split:
-        calls = calls[calls["split"] == split]
+        calls = calls[calls["split"].isin(SPLITS[split])]
     return calls.to_dict("records")
 
 
 def simulate(world, calls, policy):
-    policy = load_policy(policy)
+    policy = load_policy(policy, world)
+    n_posts = len(world.post_nodes)
     busy = {u: 0 for u in world.units}
     post = dict(world.homes)
     plans = {}
     bg = world.background
     bi = 0
-    hour_key = None
+    current_hour = None
     results = []
-    stats = {"queued": 0, "invalid_choice": 0, "relocations": 0}
-    times = epoch([c["t"] for c in calls])
-    for c, t0 in zip(calls, times):
-        t = t0 + c["processing_s"]
+    stats = {"queued": 0, "invalid_choice": 0, "policy_errors": 0, "relocations": 0}
+    tokens = {}
+    eta = make_eta(world, tokens)
+    dispatch_t = epoch([c["t"] for c in calls]) + np.array([c["processing_s"] for c in calls])
+    for i in np.argsort(dispatch_t, kind="stable"):
+        c, t = calls[i], int(dispatch_t[i])
         while bi < len(bg) and bg[bi][0] <= t:
             s, e, u = bg[bi]
             if u in busy:
                 busy[u] = max(busy[u], e)
             bi += 1
-        key = (t // 3600, c["hour"])
-        if key != hour_key:
-            hour_key = key
-            if c["hour"] not in plans:
-                plans[c["hour"]] = policy.post_plan(c["hour"], list(world.units))
-            for u, p in plans[c["hour"]].items():
-                if u in post and p != post[u] and 0 <= p < len(world.post_nodes):
-                    busy[u] = max(busy[u], t) + world.move_time(post[u], p, c["hour"])
+        if t // 3600 != current_hour:
+            current_hour = t // 3600
+            hour = int(current_hour % 24)
+            if hour not in plans:
+                try:
+                    plan = policy.post_plan(hour, list(world.units))
+                    plans[hour] = {u: int(p) for u, p in dict(plan).items() if u in post and valid_post(p, n_posts)}
+                except Exception:
+                    stats["policy_errors"] += 1
+                    plans[hour] = {}
+            boundary = current_hour * 3600
+            for u, p in plans[hour].items():
+                if p != post[u]:
+                    busy[u] = max(busy[u], boundary) + world.move_time(post[u], p, hour)
                     post[u] = p
                     stats["relocations"] += 1
+        token = f"call{len(tokens)}"
+        tokens[token] = world.call_nodes[c["call_id"]]
+        public = {"call_id": token, **{k: c[k] for k in PUBLIC if k in c}}
+        node = tokens[token]
         duty = [u for u in world.units if on_duty(world.windows, u, t)] or world.units
-        idle = [{"unit_id": u, "post": post[u]} for u in duty if busy[u] <= t]
-        wait = 0.0
-        if idle:
-            chosen = policy.choose_unit({k: c[k] for k in PUBLIC if k in c}, idle, world.eta)
-            if chosen not in {u["unit_id"] for u in idle}:
+        idle_ids = [u for u in duty if busy[u] <= t]
+        if idle_ids:
+            try:
+                chosen = policy.choose_unit(public, [{"unit_id": u, "post": post[u]} for u in idle_ids], eta)
+            except Exception:
+                stats["policy_errors"] += 1
+                chosen = None
+            if not isinstance(chosen, str) or chosen not in idle_ids:
                 stats["invalid_choice"] += 1
-                chosen = min(idle, key=lambda u: world.eta(u, c))["unit_id"]
+                chosen = min(idle_ids, key=lambda u: world.drive(post[u], node, c["hour"]))
         else:
             chosen = min(duty, key=lambda u: busy[u])
-            wait = busy[chosen] - t
             stats["queued"] += 1
-        unit = {"unit_id": chosen, "post": post[chosen]}
-        drive = world.eta(unit, c)
+        start = max(busy[chosen], t)
+        wait = start - t
+        drive = world.drive(post[chosen], node, c["hour"])
         response = c["processing_s"] + wait + c["turnout_s"] + drive
-        on_scene_and_after = max(c["busy_s"] - c["turnout_s"] - c["drive_s"], MIN_ON_SCENE_S)
-        busy[chosen] = t + wait + c["turnout_s"] + drive + on_scene_and_after
+        after = max(c["busy_s"] - c["turnout_s"] - c["drive_s"], MIN_ON_SCENE_S)
+        busy[chosen] = start + c["turnout_s"] + drive + after + world.return_drive(post[chosen], node, c["hour"])
         results.append({
             "call_id": c["call_id"],
             "t": c["t"],
@@ -228,15 +317,28 @@ def summarize(results, version, split):
     }
 
 
+def paired_ci(a, b, n=1000, seed=0):
+    by_id = {r["call_id"]: r["response_s"] for r in b}
+    pairs = [(r["response_s"], by_id[r["call_id"]]) for r in a if r["call_id"] in by_id]
+    rng = random.Random(seed)
+    diffs = []
+    for _ in range(n):
+        s = [pairs[rng.randrange(len(pairs))] for _ in pairs]
+        diffs.append(statistics.median(x for x, _ in s) - statistics.median(y for _, y in s))
+    diffs.sort()
+    point = statistics.median(x for x, _ in pairs) - statistics.median(y for _, y in pairs)
+    return {"median_diff_s": point, "ci95": [diffs[int(0.025 * n)], diffs[int(0.975 * n) - 1]], "n": len(pairs)}
+
+
 def replay(calls, policy="baseline", slowdowns=None, version=None, split="train", world=None):
     world = world or World.load(slowdowns=slowdowns)
     results, _ = simulate(world, calls, policy)
-    name = version or (policy if isinstance(policy, str) else getattr(policy, "__name__", "policy"))
+    name = version or (Path(policy).stem if isinstance(policy, str) else getattr(policy, "__name__", "policy"))
     return results, summarize(results, name, split)
 
 
-def calibrate(world, iters=8):
-    calls = load_calls("train")
+def calibrate(world, iters=10):
+    calls = load_calls("fit")
     factors = {b: 1.0 for b in BUCKETS}
     for i in range(iters):
         world.factors = factors
@@ -256,78 +358,136 @@ def calibrate(world, iters=8):
 
 def calibration_report(world):
     out = {}
-    for split in ["train", "frozen"]:
-        calls = load_calls(split)
-        results, stats = simulate(world, calls, "baseline")
+    for split in ["fit", "frozen"]:
+        results, stats = simulate(world, load_calls(split), "baseline")
         sim = statistics.median(r["response_s"] for r in results)
         hist = statistics.median(r["historical_s"] for r in results)
-        out[split] = {"sim_median_s": sim, "actual_median_s": hist, "error_pct": round(100 * (sim - hist) / hist, 2), **stats}
-        by_bucket = {}
-        for b, hs in BUCKETS.items():
-            rows = [r for r in results if r["hour"] in hs]
-            by_bucket[b] = (round(statistics.median(r["response_s"] for r in rows)), round(statistics.median(r["historical_s"] for r in rows)))
-        out[split]["by_bucket_sim_vs_actual"] = by_bucket
+        eta = [r["eta_s"] for r in results]
+        real = [r["historical_drive_s"] for r in results]
+        out[split] = {
+            "sim_median_s": sim,
+            "actual_median_s": hist,
+            "error_pct": round(100 * (sim - hist) / hist, 2),
+            "drive_spearman": round(float(spearmanr(eta, real).statistic), 3),
+            "drive_median_abs_err_s": round(statistics.median(abs(x - y) for x, y in zip(eta, real))),
+            **stats,
+            "by_bucket_sim_vs_actual": {
+                b: (round(statistics.median(r["response_s"] for r in results if r["hour"] in hs)), round(statistics.median(r["historical_s"] for r in results if r["hour"] in hs)))
+                for b, hs in BUCKETS.items()
+            },
+        }
     return out
 
 
 def self_check():
     travel = np.array([[0.0, 100.0, 400.0, 900.0], [400.0, 0.0, 100.0, 900.0]])
-    world = World(travel, np.array([0, 2]), {"c1": 3, "c2": 2, "c3": 2, "c4": 1}, {"A": 0, "B": 1}, {}, [], {b: 1.0 for b in BUCKETS})
+    back = travel.copy()
+
+    def world_():
+        return World(travel, back, np.array([0, 2]), {"c1": 3, "c2": 2, "c3": 2, "c4": 1}, {"A": 0, "B": 1}, {}, [], {b: 1.0 for b in BUCKETS})
+
     base = {"processing_s": 60.0, "turnout_s": 10.0, "drive_s": 100.0, "busy_s": 1800.0, "historical_s": 200.0, "hour": 12, "nbhd": "x", "lat": 0.0, "lon": 0.0}
     calls = [
         {**base, "call_id": "c2", "t": "2026-01-01T12:00:00"},
         {**base, "call_id": "c3", "t": "2026-01-01T12:01:00"},
         {**base, "call_id": "c4", "t": "2026-01-01T12:02:00"},
     ]
-    policy = load_policy("baseline")
-    policy.HOME = {"A": 0, "B": 1}
-    r, stats = simulate(world, calls, policy)
+
+    class Base:
+        @staticmethod
+        def post_plan(hour, units):
+            return {"A": 0, "B": 1}
+
+        @staticmethod
+        def choose_unit(call, idle, eta):
+            return min(idle, key=lambda u: eta(u, call))["unit_id"]
+
+    w = world_()
+    r, stats = simulate(w, calls, Base)
     assert r[0]["unit"] == "B" and r[0]["eta_s"] == 100.0, r[0]
     assert r[1]["unit"] == "A" and r[1]["eta_s"] == 400.0, r[1]
     assert r[2]["wait_s"] > 0 and stats["queued"] == 1, r[2]
     assert r[0]["response_s"] == 60 + 10 + 100
 
-    world.factors = {b: 2.0 for b in BUCKETS}
-    r2, _ = simulate(world, calls[:1], policy)
-    assert r2[0]["eta_s"] == 200.0
+    w = world_()
+    w.factors = {b: 2.0 for b in BUCKETS}
+    assert simulate(w, calls[:1], Base)[0][0]["eta_s"] == 200.0
 
-    world.factors = {b: 1.0 for b in BUCKETS}
-    world.background = [(int(epoch(["2026-01-01T11:59:00"])[0]), int(epoch(["2026-01-01T13:00:00"])[0]), "B")]
-    r3, _ = simulate(world, calls[:1], policy)
-    assert r3[0]["unit"] == "A", r3[0]
+    w = world_()
+    w.background = [(int(epoch(["2026-01-01T11:59:00"])[0]), int(epoch(["2026-01-01T13:00:00"])[0]), "B")]
+    assert simulate(w, calls[:1], Base)[0][0]["unit"] == "A"
 
-    world.background = []
-    world.windows = {"A": ([0], [10]), "B": ([0], [2**40])}
-    r4, _ = simulate(world, calls[:2], policy)
+    w = world_()
+    w.windows = {"A": ([0], [10]), "B": ([0], [2**40])}
+    r4, _ = simulate(w, calls[:2], Base)
     assert r4[0]["unit"] == "B" and r4[1]["unit"] == "B" and r4[1]["wait_s"] > 0, r4
 
-    class Mover:
+    class Mover(Base):
         @staticmethod
         def post_plan(hour, units):
             return {"A": 1, "B": 1}
 
-        choose_unit = staticmethod(policy.choose_unit)
-
-    world.windows = {}
-    r5, s5 = simulate(world, calls[:1], Mover)
+    r5, s5 = simulate(world_(), calls[:1], Mover)
     assert s5["relocations"] == 1 and r5[0]["unit"] == "B", (r5, s5)
 
-    class Bad:
-        post_plan = staticmethod(policy.post_plan)
-
+    class Bad(Base):
         @staticmethod
         def choose_unit(call, idle, eta):
             return "nope"
 
-    _, s6 = simulate(world, calls[:1], Bad)
-    assert s6["invalid_choice"] == 1
+    assert simulate(world_(), calls[:1], Bad)[1]["invalid_choice"] == 1
+
+    class AppendBusy(Base):
+        @staticmethod
+        def choose_unit(call, idle, eta):
+            idle.append({"unit_id": "B", "post": 1})
+            return "B"
+
+    r7, s7 = simulate(world_(), calls[:2], AppendBusy)
+    assert r7[1]["unit"] == "A" and s7["invalid_choice"] == 1, r7
+
+    class Crash(Base):
+        @staticmethod
+        def post_plan(hour, units):
+            return {"A": True, "B": 99}
+
+        @staticmethod
+        def choose_unit(call, idle, eta):
+            idle.clear()
+            raise RuntimeError
+
+    r8, s8 = simulate(world_(), calls, Crash)
+    assert len(r8) == 3 and s8["policy_errors"] == 2 and s8["relocations"] == 0, s8
+
+    class Peek(Base):
+        @staticmethod
+        def choose_unit(call, idle, eta):
+            assert call["call_id"].startswith("call") and "drive_s" not in call and "historical_unit" not in call
+            assert not hasattr(eta, "__self__")
+            return idle[0]["unit_id"]
+
+    simulate(world_(), calls, Peek)
+
+    for src in ["import os", "import sys", "from pathlib import Path", "x = eta.__self__", "f = open('x')", "import sim", "g = getattr(eta, 'a')"]:
+        try:
+            check_source(src)
+            raise AssertionError(f"not rejected: {src}")
+        except PolicyRejected:
+            pass
+    check_source((POLICIES / "baseline.py").read_text())
+
+    a = [{"call_id": str(i), "response_s": 100.0 + i} for i in range(200)]
+    b = [{"call_id": str(i), "response_s": 130.0 + i} for i in range(200)]
+    ci = paired_ci(a, b, n=200)
+    assert ci["median_diff_s"] == -30 and ci["ci95"][1] < 0, ci
 
     roads = Roads()
     src = roads.nearest([37.7793], [-122.4193])
-    plain = roads.times_from(src)
-    slow = roads.times_from(src, {e: 3.0 for e in range(len(roads.edges))})
+    plain = roads.times(src)
+    slow = roads.times(src, {e: 3.0 for e in range(len(roads.edges))})
     far = roads.nearest([37.7599], [-122.4148])[0]
     assert np.isclose(slow[0, far], 3 * plain[0, far]) and 120 < plain[0, far] < 900, plain[0, far]
+    assert not plain.flags.writeable
     print("self-check ok")
 
 
@@ -343,7 +503,8 @@ def write_fixtures(world):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policy", default="baseline")
-    ap.add_argument("--split", default="train", choices=["train", "frozen"])
+    ap.add_argument("--split", default="train", choices=list(SPLITS))
+    ap.add_argument("--compare", metavar="BASELINE_POLICY")
     ap.add_argument("--out")
     ap.add_argument("--calibrate", action="store_true")
     ap.add_argument("--self-check", action="store_true")
@@ -358,10 +519,16 @@ def main():
         return
     if a.fixtures:
         return write_fixtures(world)
-    results, stats = simulate(world, load_calls(a.split), a.policy)
+    calls = load_calls(a.split)
+    try:
+        results, stats = simulate(world, calls, a.policy)
+    except PolicyRejected as e:
+        raise SystemExit(f"rejected: {e}")
     summary = summarize(results, Path(a.policy).stem, a.split)
     summary["actual_median_s"] = statistics.median(r["historical_s"] for r in results)
     summary["stats"] = stats
+    if a.compare:
+        summary["vs_" + Path(a.compare).stem] = paired_ci(results, simulate(world, calls, a.compare)[0])
     if a.out:
         Path(a.out).write_text(json.dumps({"summary": summary, "results": results}))
     print(json.dumps(summary, indent=1))
