@@ -4,7 +4,7 @@ function Unit({ kind, unit, first }) {
   const label = kind === 'engine' ? 'Engine' : 'Ambulance'
   return (
     <li className={first ? 'first' : ''}>
-      <i className={`dot ${kind === 'engine' ? 'eng' : 'amb'}`} /> {label} {unit.unit_id} <span>{mmss(unit.eta_s)}</span>
+      <i className={`dot ${kind === 'engine' ? 'eng' : 'amb'}`} /> <b>{label} {unit.unit_id}</b> <span>{mmss(unit.eta_s)}</span>
     </li>
   )
 }
@@ -19,7 +19,7 @@ function Side({ title, side, gm, vs }) {
       <h3>{title}</h3>
       <strong className="dp-first">{mmss(f.eta_s)}</strong>
       <span className="dp-sub">until a paramedic arrives</span>
-      {saved != null && <span className="dp-gain">{saved >= 1 ? `${mmss(saved)} sooner` : 'same as baseline'}</span>}
+      {saved != null && <span className={saved >= 1 ? 'dp-gain' : 'dp-gain flat'}>{saved >= 1 ? `${mmss(saved)} sooner` : 'same as baseline'}</span>}
       <ul>
         <Unit kind="ambulance" unit={side.chosen} first={f.kind !== 'engine'} />
         {side.engine
