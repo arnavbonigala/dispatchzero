@@ -142,11 +142,11 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 
 ### A: data and simulator
 - [x] `fetch.py` done, including unit dispatch history for background load
-- [ ] `sim.py` replay with real road travel times and unit availability
-- [ ] Baseline policy running in the real simulator
-- [ ] Calibration: baseline sim median within 10% of actual (1:30 go/no-go)
-- [ ] Sim speed-up (cached travel times from posts)
-- [ ] `sim.py --self-check` passing
+- [x] `sim.py` replay with real road travel times and unit availability
+- [x] Baseline policy running in the real simulator
+- [x] Calibration: baseline sim median within 10% of actual (1:30 go/no-go): +2.6% train, +6.0% frozen
+- [x] Sim speed-up (cached travel times from posts): full train replay in about 1.5s
+- [x] `sim.py --self-check` passing
 - [ ] Worst-50 calls with context for the agent
 - [ ] Stretch: learned road speeds, kept only if frozen-week error drops
 - [ ] `edge_slowdowns()` wired into the simulator
@@ -175,7 +175,7 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [ ] Pitch with real numbers
 
 ### Checkpoints
-- [ ] 1:30 go/no-go: calibration within 10%
+- [x] 1:30 go/no-go: calibration within 10%
 - [ ] 2:45: an accepted version beats baseline on the frozen week
 - [ ] 3:45: full loop visible in the UI
 - [ ] 4:30: demo runs 3 times cleanly
