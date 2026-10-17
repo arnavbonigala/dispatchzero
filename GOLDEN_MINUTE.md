@@ -159,8 +159,8 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] README
 
 ### B: cameras and UI
-- [ ] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
-- [ ] 10 cameras live with the slowdown formula
+- [x] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
+- [x] 10 cameras live with the slowdown formula
 - [ ] React map with call replay from fixtures
 - [ ] Camera markers (green/yellow/red, thumbnail on click)
 - [ ] Rush-hour jam clips recorded, plus replay mode

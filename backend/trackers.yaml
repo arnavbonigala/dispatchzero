@@ -1,0 +1,8 @@
+# ByteTrack tuned for small, low-confidence cars in 320x240 Caltrans streams
+tracker_type: bytetrack
+track_high_thresh: 0.2
+track_low_thresh: 0.05
+new_track_thresh: 0.2
+track_buffer: 30
+match_thresh: 0.9
+fuse_score: True
