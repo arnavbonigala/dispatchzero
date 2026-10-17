@@ -77,7 +77,8 @@ function dispatchLegs(result, elapsed) {
     const gm = key === 'gm'
     for (const [u, color] of [[s.engine, C.engine], [s.chosen && { ...s.chosen, route: s.route }, C.unit]]) {
       if (!u?.route?.length) continue
-      legs.push({ id: `${key}-${u.unit_id}`, gm, color, path: u.route.map(ll), at: ll(along(u.route, elapsed / u.eta_s)),
+      const engine = color === C.engine
+      legs.push({ id: `${key}-${u.unit_id}`, gm, color, offset: [0, (gm ? -18 : 18) * (engine ? 2.2 : 1)], path: u.route.map(ll), at: ll(along(u.route, elapsed / u.eta_s)),
         done: elapsed >= u.eta_s, label: `${gm ? 'Golden Minute' : 'Baseline'} · ${u.unit_id}` })
     }
   }
@@ -188,7 +189,7 @@ export default function CityMap({ calls, now, posts, neighborhoods, slowNbhds, c
     }),
     new TextLayer({
       id: 'd-labels', data: legs.filter((l) => !l.done), getPosition: (l) => l.at, getText: (l) => l.label,
-      getSize: 12, getColor: [241, 245, 249, 255], getPixelOffset: [0, -18], fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 600,
+      getSize: 12, getColor: [241, 245, 249, 255], getPixelOffset: (l) => l.offset, fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontWeight: 600,
       background: true, getBackgroundColor: [22, 25, 30, 235], backgroundPadding: [6, 3], characterSet: 'auto',
     }),
     ...(hospital ? [
