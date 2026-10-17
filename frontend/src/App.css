@@ -190,6 +190,7 @@ h2 {
 .dot.eng { background: #0e7490; }
 .dot.off { background: transparent; border: 1px solid var(--muted); }
 .dp-reason { margin: 0; font-size: 0.82rem; line-height: 1.4; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
+.dp-traffic { border-left: 3px solid var(--bad, #d6453d); }
 .dp-hosp { display: flex; gap: 10px; align-items: center; font-size: 0.8rem; }
 .dp-hosp div { display: grid; }
 .dp-hosp span:not(.dp-h) { color: var(--muted); font-size: 0.75rem; }

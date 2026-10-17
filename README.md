@@ -28,7 +28,7 @@ cd frontend && npm install && npm run dev
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
 | `backend/agent.py` | C | Improvement loop: `--iters N [--model sonnet] [--traffic]`, `--headline` |
 | `backend/api.py` | C | FastAPI: `uvicorn --app-dir backend api:app --port 8000` |
-| `backend/dispatch.py` | B | Live dispatch of one incident: replays the frozen week to that moment, then compares baseline and the best engine-mode version (ambulance, engine, hospital, routes). `/dispatch?lat=&lon=&t=&priority=2\|3`; CLI `dispatch.py LAT LON T --priority 2`. Set `GOOGLE_MAPS_API_KEY` to re-time the closest candidates with live traffic |
+| `backend/dispatch.py` | B | Live dispatch of one incident: replays the frozen week to that moment, then compares baseline and the best engine-mode version (ambulance, engine, hospital, routes). `/dispatch?lat=&lon=&t=&priority=2\|3`; CLI `dispatch.py LAT LON T --priority 2`. Set `GOOGLE_MAPS_API_KEY` to re-time the closest candidates with live traffic; without it, the latest `data/camera_readings.json` slows the freeways it covers, every idle unit is re-timed on those roads, routes avoid the jam, and `traffic_reason` says when a camera changed the pick (`traffic: google\|cameras\|osm`) |
 | `backend/cameras.py` | B | Caltrans → YOLO → `CameraReading`; latest in `data/camera_readings.json`, history appended to `data/camera_log.jsonl` |
 | `fixtures/` | B, C | Sample `results.json`, `summary.json`, `versions.jsonl`, `cameras.json`, `posts.json` in contract shape. Regenerate with `python backend/sim.py --fixtures` |
 | `frontend/` | B | Vite + React + Leaflet |

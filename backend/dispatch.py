@@ -3,7 +3,8 @@ paramedic engine to send.
 
 The simulator is used unchanged. The incident is injected as a probe call at the requested moment, and a thin
 wrapper around the policy records the idle units, their posts and the policy's pick when the probe comes up.
-With GOOGLE_MAPS_API_KEY set (env or .env), the closest candidates are re-timed with Google's live traffic.
+With GOOGLE_MAPS_API_KEY set (env or .env), the closest candidates are re-timed with Google's live traffic. Without it,
+the latest Caltrans camera readings (data/camera_readings.json from cameras.py) slow the freeway stretches they watch.
 """
 import argparse
 import json
@@ -49,6 +50,50 @@ def hospitals():
     hs = json.loads((sim.DATA / "hospitals.json").read_text())
     hs = [h for h in hs if h.get("general", True)]
     return hs, world().roads.nearest([h["lat"] for h in hs], [h["lon"] for h in hs])
+
+
+@lru_cache(4)
+def _camera_state(mtime):
+    return camera_state(json.loads((sim.DATA / "camera_readings.json").read_text()))
+
+
+def camera_state(rows):
+    """Camera readings as road slowdowns and drive times from every post; None when no road is slowed."""
+    cams = {c["camera_id"]: c for c in json.loads((sim.DATA / "cameras.json").read_text())}
+    # cameras.json supplies the route for readings saved before cameras.py recorded it
+    readings = [{**cams.get(r["camera_id"], {}), **{k: v for k, v in r.items() if v != ""}} for r in rows if isinstance(r, dict) and "camera_id" in r]
+    slowed = [r for r in readings if float(r.get("slowdown", 1.0)) > 1.0]
+    w = world()
+    slow = sim.edge_slowdowns(slowed, w.roads)
+    if not slow:
+        return None
+    return {"slow": slow, "travel": w.roads.times(w.post_nodes, slow), "readings": slowed,
+            "ts": max((str(r.get("ts", "")) for r in readings), default="")}
+
+
+def camera_traffic():
+    path = sim.DATA / "camera_readings.json"
+    try:
+        return _camera_state(path.stat().st_mtime) if path.exists() else None
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print(f"camera readings unusable: {e}")
+        return None
+
+
+def camera_on_route(cams, route):
+    """The most slowed camera within camera range of a route's points, or None."""
+    pts = sim.xy([p[0] for p in route], [p[1] for p in route])
+    a, ab = pts[:-1], pts[1:] - pts[:-1]  # freeway segments are long, so measure to the segments, not their ends
+
+    def dist(r):
+        c = sim.xy([r["lat"]], [r["lon"]])[0]
+        if len(pts) < 2:
+            return float(np.linalg.norm(pts - c, axis=1).min())
+        t = np.clip(((c - a) * ab).sum(axis=1) / np.maximum((ab * ab).sum(axis=1), 1e-9), 0, 1)
+        return float(np.linalg.norm(a + t[:, None] * ab - c, axis=1).min())
+
+    near = [r for r in cams["readings"] if dist(r) <= sim.CAMERA_RADIUS_M]
+    return max(near, key=lambda r: float(r["slowdown"]), default=None)
 
 
 def google_key():
@@ -149,7 +194,7 @@ def post_ll(w, p):
     return [w.posts[p]["lat"], w.posts[p]["lon"]]
 
 
-def decide(version, probe):
+def decide(version, probe, cams=None):
     w = world()
     before = frozen_calls()
     before = before[before["dispatch_epoch"] < sim.epoch([probe["t"]])[0]].drop(columns="dispatch_epoch")
@@ -161,11 +206,28 @@ def decide(version, probe):
         return {"version": version, "error": "no idle ambulance at this moment"}
 
     call, idle, eta = seen["call"], seen["idle"], seen["eta"]
+    node = w.call_nodes[PROBE]
     sim_eta = {u["unit_id"]: eta(u, call) for u in idle}
     ranked = sorted(idle, key=lambda u: sim_eta[u["unit_id"]])[:CANDIDATES]
-    live = google_drive_s([post_ll(w, u["post"]) for u in ranked], (probe["lat"], probe["lon"]))
+    live = None if cams else google_drive_s([post_ll(w, u["post"]) for u in ranked], (probe["lat"], probe["lon"]))
     offset = w.offsets[sim.BUCKET_OF[probe["hour"]]]
-    if live:
+    camera_note = None
+    if cams:
+        # same model as the simulator's drive time, on roads slowed by the latest camera readings
+        mult = w.mult(probe["hour"], probe["nbhd"])
+        timed = {u["unit_id"]: float(cams["travel"][u["post"], node]) * mult + offset for u in idle}
+        try:
+            pick = rec.inner.choose_unit(call, idle, lambda u, c: timed[u["unit_id"]] if u.get("unit_id") in timed else eta(u, c))
+        except Exception:  # the simulator's rule for a failing policy: closest idle unit
+            pick = None
+        final = timed
+        blind = seen["pick"]
+        if pick in final and blind in final and blind != pick and final[blind] - final[pick] >= 1:
+            _, blind_route = w.roads.path(w.post_nodes[next(u["post"] for u in idle if u["unit_id"] == blind)], node)
+            cam = camera_on_route(cams, blind_route)
+            camera_note = {"blind_unit": blind, "blind_eta_s": round(final[blind], 1), "saved_s": round(final[blind] - final[pick], 1),
+                           "camera": cam["name"] if cam else None, "slowdown": float(cam["slowdown"]) if cam else None}
+    elif live:
         # Google's road time replaces ours for the closest candidates; keep the calibration offset so both sources stay comparable
         timed = {u["unit_id"]: live[i] + offset for i, u in enumerate(ranked) if i in live}
         eta_live = lambda u, c: timed.get(u["unit_id"], sim_eta[u["unit_id"]])
@@ -176,12 +238,11 @@ def decide(version, probe):
     if pick not in final:
         pick = min(final, key=final.get)
 
-    node = w.call_nodes[PROBE]
     unit = {u["unit_id"]: u for u in idle}
     cands = sorted(ranked, key=lambda u: final[u["unit_id"]])
     nearest = cands[0]["unit_id"]
     p = unit[pick]["post"]
-    _, route = w.roads.path(w.post_nodes[p], node)
+    _, route = w.roads.path(w.post_nodes[p], node, cams["slow"] if cams else None)
     engine = None
     if row.get("engine_unit"):
         ep = int(row["engine_post"])
@@ -192,7 +253,8 @@ def decide(version, probe):
     first = ("engine", engine["unit_id"], engine["eta_s"]) if engine and engine["eta_s"] < amb_s else ("ambulance", pick, amb_s)
     return {
         "version": version,
-        "traffic": "google" if live else "osm",
+        "traffic": "google" if live else "cameras" if cams else "osm",
+        "camera_note": camera_note,
         "n_idle": len(idle),
         "idle_ids": sorted(unit),
         "chosen": {"unit_id": pick, "post": p, "station_area": w.posts[p]["station_area"], "lat": post_ll(w, p)[0],
@@ -266,15 +328,25 @@ def explain(base, agent, hour):
     return f"Agent arrives {lead}: {why}. Baseline's closest idle unit is {b['unit_id']} at post {b['post']}."
 
 
+def traffic_reason(side):
+    note = side and "error" not in side and side.get("camera_note")
+    if not note:
+        return None
+    where = f"Cameras show {note['camera'].split('--')[-1].strip()} at {note['slowdown']:.1f}x normal travel time" if note["camera"] else "Cameras show freeway congestion"
+    return (f"{where}. Without them {note['blind_unit']} looked closest; sending {side['chosen']['unit_id']} instead, "
+            f"about {round(note['saved_s'])} s sooner.")
+
+
 def dispatch(lat, lon, t, version=None, priority="3"):
     version = version or best_version()
     probe = probe_call(float(lat), float(lon), t, priority)
     w = world()
+    cams = None if google_key() else camera_traffic()
     with _lock:  # the probe's road node lives on the shared world for the length of the replay
         w.call_nodes[PROBE] = int(w.roads.nearest([probe["lat"]], [probe["lon"]])[0])
         try:
-            base = decide("baseline", probe)
-            agent = decide(version, probe) if version else None
+            base = decide("baseline", probe, cams)
+            agent = decide(version, probe, cams) if version else None
             node = w.call_nodes[PROBE]
         finally:
             w.call_nodes.pop(PROBE, None)
@@ -284,9 +356,11 @@ def dispatch(lat, lon, t, version=None, priority="3"):
         "baseline": base,
         "agent": agent,
         "reason": explain(base, agent, probe["hour"]),
+        "traffic_reason": traffic_reason(agent) or traffic_reason(base),
         "hospital": hospital,
         "hospital_alternatives": alternatives,
-        "traffic": "google" if google_key() else "osm",
+        "traffic": "google" if google_key() else "cameras" if cams else "osm",
+        "cameras_ts": cams["ts"] if cams else None,
     }
 
 
