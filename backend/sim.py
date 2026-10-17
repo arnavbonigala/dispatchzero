@@ -183,7 +183,7 @@ def load_policy(policy, world):
 
 
 class World:
-    def __init__(self, travel, back, post_nodes, call_nodes, homes, windows, background, offsets, posts=(), rel=None):
+    def __init__(self, travel, back, post_nodes, call_nodes, homes, windows, background, offsets, posts=(), rel=None, end_nodes=None):
         self.travel = travel
         self.back = back
         self.post_nodes = post_nodes
@@ -195,6 +195,7 @@ class World:
         self.offsets = offsets
         self.posts = list(posts)
         self.rel = rel or {}
+        self.end_nodes = end_nodes or {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -205,13 +206,18 @@ class World:
         dispatches = pd.read_parquet(DATA / "dispatches.parquet")
         post_nodes = roads.nearest([p["lat"] for p in posts], [p["lon"] for p in posts])
         call_nodes = dict(zip(calls["call_id"], roads.nearest(calls["lat"], calls["lon"])))
+        hospitals = json.loads((DATA / "hospitals.json").read_text())
+        h_xy = xy([h["lat"] for h in hospitals], [h["lon"] for h in hospitals])
+        h_nodes = roads.nearest([h["lat"] for h in hospitals], [h["lon"] for h in hospitals])
+        nearest_h = np.linalg.norm(xy(calls["lat"], calls["lon"])[:, None, :] - h_xy[None, :, :], axis=2).argmin(axis=1)
+        end_nodes = {cid: int(h_nodes[h]) if tr else int(call_nodes[cid]) for cid, tr, h in zip(calls["call_id"], calls["transported"], nearest_h)}
         bg = dispatches[~dispatches["simulated"]]
         background = sorted(zip(epoch(bg["start"]), epoch(bg["end"]), bg["unit_id"]))
         world = cls(
             roads.times(post_nodes, slowdowns),
             roads.times(post_nodes, slowdowns, reverse=True),
             post_nodes, call_nodes, homes, shift_windows(dispatches), background,
-            offsets or load_offsets(), posts, load_rel(),
+            offsets or load_offsets(), posts, load_rel(), end_nodes,
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
@@ -300,7 +306,8 @@ def simulate(world, calls, policy, trace=False):
     dispatch_t = epoch([c["t"] for c in calls]) + np.array([c["processing_s"] for c in calls])
     for i in np.argsort(dispatch_t, kind="stable"):
         c, t = calls[i], int(dispatch_t[i])
-        at = lambda u: post[u] if t >= arrive[u] else prev[u]
+        pos = lambda u, when: post[u] if when >= arrive[u] else prev[u]
+        at = lambda u: pos(u, t)
         while bi < len(bg) and bg[bi][0] <= t:
             s, e, u = bg[bi]
             if u in busy:
@@ -344,7 +351,7 @@ def simulate(world, calls, policy, trace=False):
             stats["queued"] += 1
         start = max(busy[chosen], t)
         wait = start - t
-        origin = at(chosen) if wait == 0 else post[chosen]
+        origin = pos(chosen, start)
         arrive[chosen] = 0
         drive = world.drive(origin, node, c["hour"], c["nbhd"])
         if trace:
@@ -363,7 +370,10 @@ def simulate(world, calls, policy, trace=False):
             }
         response = c["processing_s"] + wait + c["turnout_s"] + drive
         after = max(c["busy_s"] - c["turnout_s"] - c["drive_s"], MIN_ON_SCENE_S)
-        busy[chosen] = start + c["turnout_s"] + drive + after + world.return_drive(post[chosen], node, c["hour"], c["nbhd"])
+        end = world.end_nodes.get(c["call_id"], node)
+        busy[chosen] = start + c["turnout_s"] + drive + after
+        prev[chosen] = int(np.argmin(world.travel[:, end]))
+        arrive[chosen] = busy[chosen] + world.return_drive(post[chosen], end, c["hour"], c["nbhd"])
         results.append({
             "call_id": c["call_id"],
             "t": c["t"],
@@ -609,6 +619,24 @@ def self_check():
     late = [{**calls[0], "t": "2026-01-01T12:20:00"}]
     r10, _ = simulate(world_(), late, Swap)
     assert r10[0]["unit"] == "A" and r10[0]["from_post"] == 1, r10
+
+    clear_travel = np.array([[0.0, 100.0, 400.0, 900.0], [400.0, 0.0, 100.0, 50.0]])
+    wc = World(clear_travel, clear_travel.copy(), np.array([0, 1]), {"k1": 2, "k2": 2, "k3": 2}, {"A": 0}, {}, [], {b: 0.0 for b in BUCKETS}, end_nodes={"k1": 3})
+    kc = [
+        {**base, "call_id": "k1", "t": "2026-01-01T12:00:00"},
+        {**base, "call_id": "k2", "t": "2026-01-01T12:37:00"},
+        {**base, "call_id": "k3", "t": "2026-01-01T13:30:00"},
+    ]
+
+    class Home(Base):
+        @staticmethod
+        def post_plan(hour, units):
+            return {"A": 0}
+
+    rk, _ = simulate(wc, kc, Home)
+    assert rk[0]["from_post"] == 0 and rk[0]["eta_s"] == 400.0, rk[0]
+    assert rk[1]["from_post"] == 1 and rk[1]["eta_s"] == 100.0 and rk[1]["wait_s"] == 0, rk[1]
+    assert rk[2]["from_post"] == 0 and rk[2]["eta_s"] == 400.0, rk[2]
 
     class Bad(Base):
         @staticmethod
