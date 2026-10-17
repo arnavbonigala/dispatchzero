@@ -41,6 +41,49 @@ function Chart({ versions }) {
   )
 }
 
+function why(reason = '') {
+  if (reason.includes('engine conflicts')) return 'Tied up too many fire engines'
+  if (reason.includes('citywide')) return 'Slowed down the rest of the city'
+  if (reason.startsWith('holdout')) return 'Did not hold up on a new week'
+  if (reason.includes('not below best')) return 'No better than the current best'
+  return 'Broke the dispatch rules'
+}
+
+const firstSentence = (text) => text.split(/(?<=\.)\s/)[0]
+
+function Steps({ versions }) {
+  const [all, setAll] = useState(false)
+  let best = metric(versions[0])
+  const steps = versions.slice(1).map((v, i) => {
+    const gain = v.accepted ? metric(v) - best : null
+    if (v.accepted) best = metric(v)
+    return { ...v, n: i + 1, gain }
+  }).reverse()
+  const shown = all ? steps : steps.slice(0, 5)
+  return (
+    <>
+      <ol className="vl-feed">
+        {shown.map((v) => (
+          <li key={v.version} className={v.accepted ? 'vl-item' : 'vl-item vl-item-rejected'}>
+            <div className="vl-head">
+              <strong>Step {v.n}</strong>
+              <span className={v.accepted ? 'vl-badge vl-badge-ok' : 'vl-badge'}>{v.accepted ? 'kept' : 'rejected'}</span>
+              {v.gain != null && <span className="vl-meta">{mmss(Math.abs(v.gain))} {v.gain <= 0 ? 'faster' : 'slower'}</span>}
+            </div>
+            <p>{firstSentence(v.diagnosis)}</p>
+            {!v.accepted && <p className="vl-reason">{why(v.reason)}</p>}
+          </li>
+        ))}
+      </ol>
+      {steps.length > 5 && (
+        <button className="vl-more" onClick={() => setAll(!all)} aria-expanded={all}>
+          {all ? 'Show latest 5' : `Show all ${steps.length} steps`}
+        </button>
+      )}
+    </>
+  )
+}
+
 export default function VersionLog() {
   const [versions, setVersions] = useState(() => parse(fxVersions))
   useEffect(() => {
@@ -49,7 +92,6 @@ export default function VersionLog() {
       .then(setVersions)
       .catch(() => {})
   }, [])
-  const latest = [...versions].reverse().find((v) => v.accepted && v.version !== 'baseline')
   const kept = versions.filter((v) => v.accepted && v.version !== 'baseline').length
   const label = versions.some((v) => v.train_mean != null) ? 'Average time to first paramedic' : 'Median in the 10 slowest neighborhoods'
   return (
@@ -57,7 +99,7 @@ export default function VersionLog() {
       <h2 id="vl-title">How the AI learned it</h2>
       <p className="vl-sub">{versions.length - 1} rules written and tested, {kept} kept. {label}, training weeks.</p>
       <Chart versions={versions} />
-      {latest && <p className="vl-latest">{latest.diagnosis.split(/(?<=\.)\s/)[0]}</p>}
+      <Steps versions={versions} />
     </section>
   )
 }
