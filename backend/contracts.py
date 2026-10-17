@@ -48,6 +48,7 @@ class Summary(TypedDict):
     mean_s: float
     lt_mean_s: float | None
     weighted_mean_s: float
+    nbhd_spread_s: float
     p90_s: float
     pct_under_8min: float
     n: int

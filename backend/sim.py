@@ -414,6 +414,7 @@ def load_policy(policy, world):
     mod.ENGINE_LOAD = dict(world.engine_load)
     mod.WEATHER = {k: dict(v) for k, v in world.weather.items()}
     mod.FORECAST = {k: v for k, v in world.forecast.items() if not k.startswith("_")}
+    mod.COVERAGE = make_coverage(world)
     mod.NBHD = {k: dict(v) for k, v in world.nbhd_info.items()}
     random.seed(POLICY_SEED)
     spec.loader.exec_module(mod)
@@ -442,6 +443,7 @@ class World:
         self.weather = {}
         self.nbhd_info = {}
         self.forecast = {}
+        self.nbhd_nodes = {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -467,6 +469,8 @@ class World:
         )
         world.roads = roads
         world.usual = json.loads((DATA / "unit_areas.json").read_text())
+        fit = calls[calls["split"] != "frozen"].groupby("nbhd")[["lat", "lon"]].median()
+        world.nbhd_nodes = dict(zip(fit.index, (int(n) for n in roads.nearest(fit["lat"], fit["lon"]))))
         for attr, name in (("weather", "weather.json"), ("nbhd_info", "neighborhoods.json"), ("forecast", "forecast.json")):
             if (DATA / name).exists():
                 setattr(world, attr, json.loads((DATA / name).read_text()))
@@ -523,6 +527,33 @@ def fit_engine_offsets(world):
             raw = float(world.travel[world.engines[u], world.call_nodes[c["call_id"]]]) * world.mult(c["hour"], c["nbhd"])
             gaps[BUCKET_OF[c["hour"]]].append(c["engine_s"] - c["processing_s"] - raw)
     return {b: float(statistics.median(g)) if g else 0.0 for b, g in gaps.items()}
+
+
+def make_coverage(world):
+    names = list(world.nbhd_nodes)
+    nodes = [world.nbhd_nodes[n] for n in names]
+    sub = np.asarray(world.travel)[:, nodes] if names else np.zeros((len(world.post_nodes), 0))
+    sub.setflags(write=False)
+    forecast = {k: v for k, v in world.forecast.items() if not k.startswith("_")}
+    rel = dict(world.rel)
+    offsets = dict(world.offsets)
+    n_posts = len(world.post_nodes)
+    weights = {}
+
+    def coverage(units, call):
+        posts = sorted({int(u["post"]) for u in units if u.get("kind") != "engine"})
+        if any(not 0 <= p < n_posts for p in posts):
+            raise ValueError("bad post")
+        stamp = str(call["t"])[:13]
+        b = BUCKET_OF[int(call["hour"])]
+        if (stamp, b) not in weights:
+            weights[(stamp, b)] = (np.array([forecast.get(f"{n}|{stamp}", 0.0) for n in names]), np.array([rel.get(f"{n}|{b}", 1.0) for n in names]))
+        w, m = weights[(stamp, b)]
+        if not posts or not w.sum():
+            return 3600.0 if not posts else 0.0
+        return float((w * (sub[posts].min(axis=0) * m + offsets[b])).sum() / w.sum())
+
+    return coverage
 
 
 def make_eta(world, nodes):
@@ -756,6 +787,10 @@ def summarize(results, version, split, slow=None):
     r = sorted(x["response_s"] for x in results)
     sr = [x["response_s"] for x in results if x["nbhd"] in slow]
     lt = [x["response_s"] for x in results if x.get("life_threatening")]
+    by_nbhd = {}
+    for x in results:
+        by_nbhd.setdefault(x["nbhd"], []).append(x["response_s"])
+    nbhd_medians = [statistics.median(v) for v in by_nbhd.values() if len(v) >= 20]
     return {
         "version": version,
         "split": split,
@@ -764,6 +799,7 @@ def summarize(results, version, split, slow=None):
         "median_s": statistics.median(r),
         "mean_s": round(statistics.mean(r), 1),
         "lt_mean_s": round(statistics.mean(lt), 1) if lt else None,
+        "nbhd_spread_s": round(statistics.pstdev(nbhd_medians), 1) if len(nbhd_medians) > 1 else 0.0,
         "weighted_mean_s": round(sum(x["response_s"] * (2 if x.get("life_threatening") else 1) for x in results) / sum(2 if x.get("life_threatening") else 1 for x in results), 1),
         "p90_s": r[int(0.9 * (len(r) - 1))],
         "pct_under_8min": sum(x <= 480 for x in r) / len(r),
