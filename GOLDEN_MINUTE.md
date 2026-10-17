@@ -167,13 +167,13 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [ ] Backup video
 
 ### C: agent and API
-- [ ] `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`
-- [ ] FastAPI serving fixture JSON
-- [ ] Swap the stub for the real `sim.py`
+- [x] `agent.py` loop: prompt, subprocess runner with timeout, both gates, `versions.jsonl` (tested with `--backend stub`)
+- [x] FastAPI serving fixture JSON, falling back from `backend/runs/`
+- [x] Swap the stub for the real `sim.py` (agent evaluates with `sim.simulate` directly)
 - [ ] First 3 real iterations, prompt tuned
 - [ ] At least one version beats baseline on the frozen week
 - [ ] 6 to 10 iterations run, final version frozen
-- [ ] Version chart and diagnosis feed in the UI
+- [x] Version chart and diagnosis feed in the UI (`frontend/src/agent/`)
 - [ ] Pitch with real numbers
 
 ### Checkpoints
