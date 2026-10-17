@@ -146,7 +146,7 @@ def learn(rows, model):
 
 
 def contract():
-    readme = (ROOT / "README.md").read_text()
+    readme = (ROOT / "ARCHITECTURE.md").read_text()
     return readme.split("## Policy contract", 1)[1].split("\n## ", 1)[0].strip()
 
 

@@ -6,7 +6,9 @@ import './VersionLog.css'
 const W = 360
 const H = 110
 const PAD = { l: 40, r: 8, t: 10, b: 10 }
-const PLAY_MS = 450
+const STEP_MS = 70
+const RACE_MS = 2000
+const BIG_GAIN_S = 20
 
 const metric = (v) => v.train_mean ?? v.train_slow_median
 const parse = (text) => text.trim().split('\n').map((l) => JSON.parse(l))
@@ -29,11 +31,12 @@ function short(text, max = 110) {
 
 function steps(versions) {
   let best = metric(versions[0])
+  let bestV = versions[0].version
   return versions.map((v, i) => {
     const m = metric(v)
     const gain = i > 0 && v.accepted && m != null ? m - best : null
-    if (v.accepted && m != null) best = m
-    return { ...v, n: i, m, best, gain }
+    if (v.accepted && m != null) [best, bestV] = [m, v.version]
+    return { ...v, n: i, m, best, bestV, gain }
   }).filter((s) => s.m != null)
 }
 
@@ -83,7 +86,7 @@ function Detail({ s }) {
 const fxLessons = Object.values(import.meta.glob('../../fixtures/engines_lessons.md', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
 const bullets = (text) => text.split('\n').filter((l) => l.startsWith('- ')).map((l) => l.slice(2))
 
-export default function VersionLog() {
+export default function VersionLog({ onLearn }) {
   const [versions, setVersions] = useState(() => parse(fxVersions))
   const [lessons, setLessons] = useState(() => bullets(fxLessons))
   const pts = useMemo(() => steps(versions), [versions])
@@ -91,6 +94,7 @@ export default function VersionLog() {
   const [playing, setPlaying] = useState(false)
   const latestKept = pts.findLastIndex((p) => p.accepted)
   const at = Math.min(sel ?? latestKept, pts.length - 1)
+  const races = useMemo(() => new Set(pts.flatMap((p, i) => (i === 0 || i === latestKept || p.gain <= -BIG_GAIN_S ? [i] : []))), [pts, latestKept])
 
   useEffect(() => {
     fetch('/api/lessons?mode=engines')
@@ -105,13 +109,16 @@ export default function VersionLog() {
 
   useEffect(() => {
     if (!playing) return
-    if (at >= pts.length - 1) {
-      setPlaying(false)
-      return
-    }
-    const id = setTimeout(() => setSel(at + 1), PLAY_MS)
+    const id = setTimeout(() => (at >= latestKept ? setPlaying(false) : setSel(at + 1)), races.has(at) ? RACE_MS : STEP_MS)
     return () => clearTimeout(id)
-  }, [playing, at, pts.length])
+  }, [playing, at, latestKept, races])
+
+  const raceAt = playing ? pts.findLastIndex((p, i) => i <= at && races.has(i)) : -1
+  const learnV = raceAt >= 0 ? pts[raceAt].bestV : null
+  const learnN = raceAt >= 0 ? pts[raceAt].n : null
+  useEffect(() => {
+    onLearn?.(learnV && { version: learnV, n: learnN })
+  }, [learnV, learnN, onLearn])
 
   if (pts.length < 2) return null
   const pick = (i) => {

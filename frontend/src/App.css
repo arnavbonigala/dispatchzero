@@ -91,8 +91,6 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 .maplibregl-ctrl-attrib a { color: var(--ink); }
 .maplibregl-ctrl-top-right { top: 6px; right: 382px; }
 
-.sources ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; font-size: 0.82rem; line-height: 1.35; color: var(--muted); }
-.sources b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
 
 .dispatch { display: grid; gap: 10px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .dp-head { display: flex; justify-content: space-between; align-items: baseline; }
@@ -146,3 +144,11 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
   .maplibregl-ctrl-top-right { right: 0; }
   .view-toggle { right: 10px; }
 }
+
+.learn-chip {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 3; margin: 0;
+  padding: 8px 14px; font-size: 0.82rem; color: var(--muted); white-space: nowrap;
+}
+.learn-chip b { color: var(--good); font-family: var(--mono); }
+@media (max-width: 900px) { .learn-chip { top: 8px; white-space: normal; width: max-content; max-width: calc(100% - 24px); font-size: 0.75rem; } }
+.learn-chip .learn-clock { color: var(--ink); }

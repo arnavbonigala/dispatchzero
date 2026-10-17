@@ -148,6 +148,53 @@ function useDispatch(day, playback) {
 
 const gain = (diff) => mmss(Math.abs(diff))
 
+const LEARNING = Object.values(import.meta.glob('../../fixtures/engines_learning.json', { import: 'default', eager: true }))[0]
+const LEARN_HOLD_MS = 2500
+const RACE_S = 900
+const RACE_MS = 1600
+
+function useLearning(playback) {
+  const [step, setStep] = useState(null)
+  const [shown, setShown] = useState(null)
+  useEffect(() => {
+    if (step) return setShown(step)
+    const id = setTimeout(() => setShown(null), LEARN_HOLD_MS)
+    return () => clearTimeout(id)
+  }, [step])
+  const { playing, toggle } = playback
+  useEffect(() => {
+    if (step && playing) toggle()
+  }, [step, playing, toggle])
+  const version = shown?.version
+  const calls = useMemo(() => {
+    const rows = version && LEARNING?.versions[version]
+    return rows && LEARNING.calls.map((c, i) => ({ ...c, start: 0, ...Object.fromEntries(LEARNING.fields.map((f, k) => [f, rows[i][k]])) }))
+  }, [version])
+  const [now, setNow] = useState(0)
+  useEffect(() => {
+    if (!version) return
+    let raf
+    const t0 = performance.now()
+    const tick = (ts) => {
+      const k = Math.min(1, (ts - t0) / RACE_MS)
+      setNow(k * RACE_S)
+      if (k < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [version])
+  return { onLearn: setStep, calls, step: shown, now }
+}
+
+function LearnChip({ step, calls, now }) {
+  const fast = calls.filter((c) => c.response_s <= 8 * 60 && c.response_s <= now).length
+  return (
+    <p className="learn-chip glass" role="status">
+      {step.n === 0 ? 'Before learning' : `After step ${step.n}`} · <b className="learn-clock">{mmss(now)}</b> · <b>{fast}</b> of {calls.length} calls reached in 8 min
+    </p>
+  )
+}
+
 const learned = Object.values(import.meta.glob('../../fixtures/learned.json', { import: 'default', eager: true }))[0]
 
 const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -245,37 +292,6 @@ function Legend({ show, setShow }) {
   )
 }
 
-const SOURCES = [
-  ['8,607', 'SF 911 ambulance calls over 5 weeks'],
-  ['10,668', 'dispatches by 57 ambulances'],
-  ['9,998', 'dispatches by 34 paramedic fire engines, with locations'],
-  ['62%', 'of calls flagged life-threatening'],
-  ['10,033', 'intersections in the road network'],
-  ['5,165', 'real drives train its drive-time model (error 253 s → 197 s)'],
-  ['34,440', 'neighborhood-hour demand predictions from time, weather and demographics'],
-  ['', 'Lookahead: coverage of the next hour\'s expected calls before each dispatch'],
-  ['11', 'hospitals with real handoff times'],
-  ['33', 'live Caltrans freeway cameras'],
-  ['2,813', 'urgent SFPD calls in the unseen week, plus live SFPD and CHP incidents'],
-  ['16,689', 'injury crashes since 2021, as hotspots'],
-  ['840', 'hours of weather, rain and temperature'],
-  ['41', 'neighborhoods with population and share 65+'],
-  ['', 'Each engine\'s hourly workload, and demand by hour and area'],
-]
-
-function Sources() {
-  return (
-    <section className="sources" aria-labelledby="sources-title">
-      <h2 id="sources-title">Data it learns from</h2>
-      <ul>
-        {SOURCES.map(([n, label]) => (
-          <li key={label}>{n && <b>{n}</b>} {label}</li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
 function ViewToggle({ view, setView, agent }) {
   return (
     <div className="toggle" role="group" aria-label="Dispatcher shown on the map">
@@ -299,6 +315,7 @@ export default function App() {
   const day = days.includes(pickedDay) ? pickedDay : initial
 
   const dispatch = useDispatch(day, playback)
+  const learning = useLearning(playback)
   const police = usePolice(day, data.policeFixture)
   const [show, setShow] = useState({ police: true, chp: true, crashes: false })
   const incidents = useMemo(() => ({ police, chp: data.liveIncidents.chp ?? [], crashes: data.crashes.hotspots ?? [] }),
@@ -324,10 +341,11 @@ export default function App() {
   return (
     <div className="app">
       <div className="stage">
-        <CityMap calls={dispatching ? [] : calls} now={playback.now} cameras={data.cameras} posts={data.posts}
+        <CityMap calls={learning.calls ?? (dispatching ? [] : calls)} now={learning.calls ? learning.now : playback.now} race={!!learning.calls} cameras={data.cameras} posts={data.posts}
           neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}
           onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
           camera={camera} onCamera={setCamera} jam={jam} incidents={incidents} show={show} />
+        {learning.calls && <LearnChip step={learning.step} calls={learning.calls} now={learning.now} />}
       </div>
       <div className="left">
         <header className="top glass">
@@ -352,8 +370,7 @@ export default function App() {
           <CallFlow calls={[]} now={0} result={dispatch.state.result} elapsed={dispatch.elapsed} />
         </DispatchPanel>
         <CallFlow calls={dispatching ? [] : calls} now={playback.now} playing={playback.playing} result={null} elapsed={0} />
-        <VersionLog />
-        <Sources />
+        <VersionLog onLearn={learning.onLearn} />
       </aside>
       <Timeline {...playback} day={day} days={days} setDay={setDay} />
     </div>
