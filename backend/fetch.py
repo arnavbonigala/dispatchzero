@@ -46,7 +46,7 @@ def window(today):
     return end - timedelta(weeks=WEEKS), end
 
 
-ENGINE_FIELDS = ["call_number", "unit_id", "als_unit", "received_dttm", "dispatch_dttm", "on_scene_dttm", "available_dttm"]
+ENGINE_FIELDS = ["call_number", "unit_id", "als_unit", "received_dttm", "dispatch_dttm", "on_scene_dttm", "available_dttm", "case_location"]
 
 
 def fetch_rows(start, end, unit_type="MEDIC", fields=FIELDS):
@@ -159,6 +159,8 @@ def build_engines(rows, calls, posts):
         "start": d["dispatch_dttm"].dt.strftime("%Y-%m-%dT%H:%M:%S"),
         "end": d["available_dttm"].dt.strftime("%Y-%m-%dT%H:%M:%S"),
         "simulated": d["call_number"].isin(medic),
+        "lat": d["case_location"].map(lambda p: p["coordinates"][1] if isinstance(p, dict) else None),
+        "lon": d["case_location"].map(lambda p: p["coordinates"][0] if isinstance(p, dict) else None),
     }).sort_values("start").reset_index(drop=True)
     return {"engines": engines, "on_scene_s": float(on_scene[on_scene > 0].median())}, dispatches
 
