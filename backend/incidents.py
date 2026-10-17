@@ -4,6 +4,7 @@ Sources (all public, no key):
 - SFPD dispatched calls, real-time (DataSF gnap-fj3t, about 15 min behind) and closed history (2zdj-bwza)
 - CHP live incident feed, Golden Gate dispatch center, filtered to San Francisco
 - SF traffic crashes resulting in injury (DataSF ubvf-ztfx, about 7 weeks behind), as hotspots
+- SFPD incident reports (DataSF wg3w-h783, about a day behind), the last 90 days counted per 150 m cell for the heatmap
 
 Only the call type, priority, intersection and neighborhood of a police call are kept: free-text notes are dropped
 and calls DataSF marks as sensitive are skipped. Officer-initiated stops and low-priority calls (C) are left out.
@@ -13,6 +14,7 @@ CLI:
   incidents.py --loop      refresh every 2 minutes
   incidents.py --history   SFPD calls for the frozen week -> data/police_frozen.json (+ fixtures/police_tuesday.json)
   incidents.py --crashes   injury crashes since 2021 -> data/crash_hotspots.json (+ fixtures/crash_hotspots.json)
+  incidents.py --reports   SFPD incident reports, last 90 days -> data/police_reports.json (+ fixtures/police_reports.json)
 """
 import argparse
 import json
@@ -31,10 +33,12 @@ FIXTURES = ROOT / "fixtures"
 LIVE = DATA / "incidents.json"
 FROZEN = DATA / "police_frozen.json"
 HOTSPOTS = DATA / "crash_hotspots.json"
+REPORTS = DATA / "police_reports.json"
 
 POLICE_LIVE = "https://data.sf.gov/resource/gnap-fj3t.json"
 POLICE_CLOSED = "https://data.sf.gov/resource/2zdj-bwza.json"
 CRASHES = "https://data.sf.gov/resource/ubvf-ztfx.json"
+INCIDENT_REPORTS = "https://data.sf.gov/resource/wg3w-h783.json"
 CHP = "https://media.chp.ca.gov/sa_xml/sa.xml"
 CHP_CENTER = "GGCC"  # Golden Gate communications center, covers SF
 
@@ -50,6 +54,14 @@ CHP_NEAR_M = 1500
 CELL = (0.002, 0.0025)  # crash hotspot grid, about 220 m
 SINCE = "2021-01-01"
 MIN_CRASHES = 3
+REPORT_DAYS = 90
+REPORT_CELL = (0.00135, 0.0017)  # about 150 m
+REPORT_MIN = 2  # cells with a single report are left out
+# Report categories that describe paperwork rather than something happening at that spot
+NOT_PLACES = {"Lost Property", "Case Closure", "Courtesy Report", "Recovered Vehicle", "Vehicle Impounded", "Warrant",
+              "Miscellaneous Investigation", "Other", "Vehicle Misplaced"}
+VIOLENT = {"Assault", "Robbery", "Homicide", "Weapons Offense", "Weapons Carrying Etc", "Sex Offense", "Rape", "Arson",
+           "Human Trafficking (A), Commercial Sex Acts", "Human Trafficking, Commercial Sex Acts"}
 
 # SFPD call types with a weapon or violence, where a crew may need police on scene first ("Fight No Weapon" is not one)
 SAFETY = re.compile(r"SHOOT|SHOTS|SHOT SPOTTER|STAB|GUN|KNIFE|W/WEAPON|ADW|HOSTAGE|BARRICADE|EXPLOSI", re.I)
@@ -220,6 +232,49 @@ def fetch_crashes():
     print(f"{len(rows)} injury crashes {SINCE} to {last}: {len(out['hotspots'])} hotspots of {MIN_CRASHES}+")
 
 
+def report_cells(rows):
+    """Incident reports -> {lat, lon, n, violent, top} per cell, where top is the cell's most common category."""
+    cells = {}
+    for r in rows:
+        try:
+            lat, lon = float(r["latitude"]), float(r["longitude"])
+            cat = str(r.get("incident_category") or "").strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not cat or cat in NOT_PLACES or not in_sf(lat, lon):
+            continue
+        c = cells.setdefault((round(lat / REPORT_CELL[0]), round(lon / REPORT_CELL[1])), {"n": 0, "violent": 0, "lat": 0.0, "lon": 0.0, "cats": {}})
+        c["n"] += 1
+        c["violent"] += cat in VIOLENT
+        c["lat"] += lat
+        c["lon"] += lon
+        c["cats"][cat] = c["cats"].get(cat, 0) + 1
+    out = [{"lat": round(c["lat"] / c["n"], 5), "lon": round(c["lon"] / c["n"], 5), "n": c["n"], "violent": c["violent"],
+            "top": max(c["cats"], key=c["cats"].get)} for c in cells.values() if c["n"] >= REPORT_MIN]
+    return sorted(out, key=lambda c: -c["n"])
+
+
+def fetch_reports(days=REPORT_DAYS):
+    """Initial reports only (supplements repeat the same incident), with a location, from the last `days` days."""
+    since = (now_sf() - timedelta(days=days)).date().isoformat()
+    where = f"incident_datetime >= '{since}' AND report_type_code in ('II', 'VI') AND latitude IS NOT NULL"
+    rows, offset = [], 0
+    while True:
+        batch = get(INCIDENT_REPORTS, {"$select": "incident_datetime,incident_category,latitude,longitude", "$where": where,
+                                       "$order": "incident_datetime", "$limit": 50000, "$offset": offset}, timeout=120).json()
+        rows += batch
+        if len(batch) < 50000:
+            break
+        offset += 50000
+    cells = report_cells(rows)
+    last = max((str(r.get("incident_datetime", ""))[:10] for r in rows), default="")
+    out = {"from": since, "to": last, "reports": sum(c["n"] for c in cells), "cell_m": 150, "cells": cells}
+    write_json(REPORTS, out)
+    write_json(FIXTURES / "police_reports.json", out)
+    print(f"{out['reports']} SFPD incident reports {since} to {last} in {len(cells)} cells "
+          f"of {REPORT_MIN}+, {sum(c['violent'] for c in cells)} of them violent")
+
+
 def read_json(*paths):
     for p in paths:
         try:
@@ -288,11 +343,14 @@ def main():
     ap.add_argument("--loop", action="store_true")
     ap.add_argument("--history", action="store_true")
     ap.add_argument("--crashes", action="store_true")
+    ap.add_argument("--reports", action="store_true")
     a = ap.parse_args()
     if a.history:
         return fetch_history()
     if a.crashes:
         return fetch_crashes()
+    if a.reports:
+        return fetch_reports()
     while True:
         refresh_live()
         if not a.loop:

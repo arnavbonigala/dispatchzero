@@ -384,6 +384,17 @@ def traffic_reason(side):
             f"about {round(note['saved_s'])} s sooner.")
 
 
+def nearby_warnings(probe):
+    """Police calls just before this moment and live CHP incidents near the scene, for the crew. Never blocks a dispatch."""
+    import incidents
+
+    try:
+        return incidents.nearby(probe["lat"], probe["lon"], probe["t"])
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print(f"nearby incidents unusable: {e}")
+        return []
+
+
 def dispatch(lat, lon, t, version=None, priority="3"):
     version = version or best_version()
     probe = probe_call(float(lat), float(lon), t, priority)
@@ -408,6 +419,7 @@ def dispatch(lat, lon, t, version=None, priority="3"):
         "hospital_alternatives": alternatives,
         "traffic": next((s["traffic"] for s in (agent, base) if s and "traffic" in s), "osm"),
         "cameras_ts": cams["ts"] if cams else None,
+        "warnings": nearby_warnings(probe),
     }
 
 

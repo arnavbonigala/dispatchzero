@@ -126,6 +126,12 @@ def incidents_crashes():
     return load_json(DATA / "crash_hotspots.json", FIXTURES / "crash_hotspots.json")
 
 
+@app.get("/incidents/reports")
+def incidents_reports():
+    """SFPD incident reports from the last 90 days, counted per 150 m cell, for the heatmap."""
+    return load_json(DATA / "police_reports.json", FIXTURES / "police_reports.json")
+
+
 @app.get("/posts")
 def posts():
     return load_json(DATA / "posts.json", FIXTURES / "posts.json")
