@@ -536,15 +536,15 @@ def paired_ci(a, b, n=1000, seed=0):
     return {"median_diff_s": point, "ci95": [diffs[int(0.025 * n)], diffs[int(0.975 * n) - 1]], "n": len(pairs)}
 
 
-def worst_calls(world, calls, policy, n=50):
-    results, stats = simulate(world, calls, policy, trace=True)
+def worst_calls(world, calls, policy, n=50, engines=False):
+    results, stats = simulate(world, calls, policy, trace=True, engines=engines)
     for r in results:
         r["controllable_s"] = round(r["wait_s"] + r["eta_s"], 1)
         r["weekday"] = pd.Timestamp(r["t"]).day_name()
         r["bucket"] = BUCKET_OF[r["hour"]]
         r["avoidable_s"] = round(max(r["controllable_s"] - r["closest_post_drive_s"], 0), 1)
-    worst = sorted(results, key=lambda r: -r["controllable_s"])[:n]
-    keep = ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
+    worst = sorted(results, key=lambda r: -(r["response_s"] - r["processing_s"] if engines else r["controllable_s"]))[:n]
+    keep = (["response_s", "ambulance_s", "engine_unit", "engine_s"] if engines else []) + ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
             "closest_post", "closest_post_area", "closest_post_drive_s", "units_at_closest_post", "n_idle", "n_on_duty"]
     calls_by_id = {c["call_id"]: c for c in calls}
     rows = [{k: (calls_by_id[r["call_id"]].get(k) if k == "station_area" else r.get(k)) for k in keep} for r in worst]
@@ -939,7 +939,7 @@ def main():
         }, indent=1))
         return
     if a.worst:
-        out = worst_calls(world, calls, a.policy, a.worst)
+        out = worst_calls(world, calls, a.policy, a.worst, a.engines)
         if a.out:
             Path(a.out).write_text(json.dumps(out, indent=1))
         print(json.dumps(out, indent=1))
