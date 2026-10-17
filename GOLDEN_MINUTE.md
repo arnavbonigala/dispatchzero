@@ -156,7 +156,7 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] Stretch: learned road speeds, gated on the holdout week: error 206s → 196s, adopted
 - [x] `edge_slowdowns()` wired into the simulator, plus `Roads.path()` for drawing routes
 - [x] With/without-jam test (`sim.py --jam-test CAMERA_ID`): freeway jams rarely touch in-city ambulance routes
-- [ ] README
+- [x] README
 
 ### B: cameras and UI
 - [ ] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
