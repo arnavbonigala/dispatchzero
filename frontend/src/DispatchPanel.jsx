@@ -19,6 +19,12 @@ function Side({ title, side, gm }) {
   )
 }
 
+const TRAFFIC = {
+  google: 'Google live traffic',
+  cameras: 'Caltrans freeway cameras',
+  osm: 'learned road speeds (no Google key)',
+}
+
 const PRIORITIES = [
   ['3', 'Priority 3', 'lights and sirens'],
   ['2', 'Priority 2', 'urgent, no sirens'],
@@ -64,6 +70,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, priorit
             <Side title="Golden Minute" side={result.agent} gm />
           </div>
           {result.reason && <p className="dp-reason">{result.reason}</p>}
+          {result.traffic_reason && <p className="dp-reason dp-traffic">{result.traffic_reason}</p>}
           <div className="dp-hosp">
             <span className="dp-h">H</span>
             <div>
@@ -72,7 +79,8 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, priorit
             </div>
           </div>
           <p className="dp-foot">
-            Traffic: {result.traffic === 'google' ? 'Google live traffic' : 'learned road speeds (no Google key)'} ·{' '}
+            Traffic: {TRAFFIC[result.traffic] ?? TRAFFIC.osm}
+            {result.traffic === 'cameras' && result.cameras_ts && ` (readings ${result.cameras_ts.slice(11, 16)})`} ·{' '}
             <button className="dp-link" onClick={onReplay}>Replay</button>
           </p>
         </>
