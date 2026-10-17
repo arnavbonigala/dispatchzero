@@ -62,6 +62,17 @@ def headline(mode: str = ""):
     return load_json(RUNS / name, FIXTURES / name)
 
 
+@app.get("/lessons")
+def lessons(mode: str = ""):
+    p = first(RUNS / f"lessons_{'engines' if engines(mode) else 'ambulance'}.md", FIXTURES / ("engines_lessons.md" if engines(mode) else "lessons.md"))
+    return [l[2:] for l in p.read_text().splitlines() if l.startswith("- ")] if p else []
+
+
+@app.get("/learned")
+def learned():
+    return load_json(FIXTURES / "learned.json")
+
+
 @app.get("/summary/{version}")
 def summary(version: str, split: str = "frozen", mode: str = ""):
     return run(version, split, mode)["summary"]
