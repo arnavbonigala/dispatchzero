@@ -1,7 +1,9 @@
 .venv/
 __pycache__/
 data/
-runs/
+**/runs/*
+!**/runs/versions.jsonl
+!**/runs/headline.json
 node_modules/
 dist/
 .env

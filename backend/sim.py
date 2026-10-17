@@ -372,7 +372,7 @@ def worst_calls(world, calls, policy, n=50):
     keep = ["t", "weekday", "hour", "bucket", "nbhd", "station_area", "priority", "controllable_s", "wait_s", "eta_s", "avoidable_s", "unit", "from_post", "from_post_area",
             "closest_post", "closest_post_area", "closest_post_drive_s", "units_at_closest_post", "n_idle", "n_on_duty"]
     calls_by_id = {c["call_id"]: c for c in calls}
-    rows = [{k: (calls_by_id[r["call_id"]].get(k) if k == "station_area" else r.get(k)) for k in keep} for r in worst]
+    rows = [{k: (calls_by_id[r["call_id"]].get(k) if k in ("station_area", "priority") else r.get(k)) for k in keep} for r in worst]
     count = lambda key: dict(pd.Series([r[key] for r in worst]).value_counts().head(8))
     avoidable = pd.DataFrame(results).groupby(["nbhd", "bucket"])["avoidable_s"].sum().sort_values(ascending=False).head(10)
     return {

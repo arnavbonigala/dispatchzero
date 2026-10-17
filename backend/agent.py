@@ -465,7 +465,7 @@ def main():
         if "frozen" in splits:
             raise SystemExit("the frozen week is only evaluated by --final")
         result = evaluate(a.eval, splits)
-        Path(a.out).write_text(json.dumps(result))
+        Path(a.out).write_text(json.dumps(result, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
         return
     if a.final:
         final()
