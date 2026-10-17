@@ -120,6 +120,26 @@ The 148 s median from call received to dispatch splits into received → entry (
 
 Caveat: some entry → dispatch time is real triage or waiting for a free unit, so this is an upper bound on what faster dispatch could save.
 
+## Paramedic engines
+
+SF sends a fire engine to only 43% of ambulance calls, and 34 of its engines carry a paramedic. When one goes, it beats the ambulance about 75% of the time, by a median of about 2.7 minutes. `sim.py --engines` adds those engines: each waits at its own station, stays busy with its real fire and other calls (`data/engine_dispatches.parquet`), and the score becomes the time to the first paramedic on scene, by engine or by ambulance. It is calibrated against history without replay tuning: engine offsets come from fit weeks only. The simulated first-paramedic median is 550 s vs a real 548 s on fit and 557 s vs 560 s on frozen.
+
+A policy can add:
+
+```python
+def send_engine(call: Call, engines: list[IdleUnit], eta, ambulance_s: float) -> str | None
+```
+
+`engines` are idle paramedic engines (`kind: "engine"`, so `eta` uses engine timing), `ambulance_s` is the chosen ambulance's time from dispatch to scene, and `ENGINES` (engine to station post) is injected. Without `send_engine`, the simulator sends the nearest idle engine exactly when history did. `stats.engine_conflicts` counts real engine calls that start while the simulator has that engine on a medical call, which is the price of sending more.
+
+Frozen week, first paramedic on scene, paired against the baseline:
+
+| Policy | Everyone (median) | Slow neighborhoods | Under 8 min | Engine conflicts / week |
+|---|---|---|---|---|
+| Baseline (history's engine use) | 557 s | | 37% | 24 |
+| `reference_engine_3min`: send if 3+ min ahead of the ambulance | −75 s (CI −90 to −63) | −123 s (CI −147 to −88) | 49% | 54 |
+| `reference_engine`: send if ahead of the ambulance | −127 s (CI −140 to −116) | −148 s (CI −169 to −115) | 66% | 90 |
+
 ## Agent context
 
 `sim.py --policy NAME --split train --worst 50 --out FILE` returns the 50 calls with the most controllable time (queue wait + drive), each with the closest post, its drive time, which units were based there and whether they were idle, busy or off duty, plus `avoidable_s`, and aggregates: worst calls by neighborhood and bucket, and the top (neighborhood, bucket) cells by total avoidable seconds.
