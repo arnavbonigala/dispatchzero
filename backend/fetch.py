@@ -9,6 +9,22 @@ import requests
 DATA = Path(__file__).parents[1] / "data"
 SODA = "https://data.sf.gov/resource/nuek-vuh3.json"
 CALTRANS = "https://cwwp2.dot.ca.gov/data/d4/cctv/cctvStatusD04.json"
+OFFLOAD = "https://data.sf.gov/resource/6x9q-izga.json"
+OFFLOAD_MONTHS = 6
+HOSPITALS = {
+    "ZSFG": ("San Francisco General", True),
+    "CPMC - Davies": ("CPMC Davies", True),
+    "CPMC - Mission Bernal": ("CPMC Mission Bernal", True),
+    "CPMC - Van Ness": ("CPMC Van Ness", True),
+    "Chinese": ("Chinese Hospital", True),
+    "Kaiser": ("Kaiser Permanente Medical Center Geary", True),
+    "Saint Francis": ("Saint Francis Memorial", True),
+    "St. Mary's": ("Saint Mary's", True),
+    "UCSF - Parnassus": ("Moffett & Long", True),
+    "UCSF - Mission Bay": ("Benioff Children", False),
+    "VA": ("VA Medical Center", False),
+}
+BAND_MID_MIN = {"under 30": 15, "30-59": 45, "60-119": 90, "120-179": 150, "over 180": 200}
 WEEKS = 5
 FIELDS = [
     "call_number", "unit_id", "received_dttm", "entry_dttm", "dispatch_dttm", "response_dttm",
@@ -144,15 +160,45 @@ def fetch_cameras():
     return out
 
 
+def fetch_offload():
+    rows = get_json(OFFLOAD, {"$limit": 50000, "$order": "month_start_date DESC"})
+    months = sorted({r["month_start_date"] for r in rows}, reverse=True)[:OFFLOAD_MONTHS]
+    out = {}
+    for r in rows:
+        if r["month_start_date"] not in months:
+            continue
+        h = out.setdefault(r["hospital_abbrev"], {"p90": [], "bands": {}})
+        d, v = r["metric_definition"], float(r["value"])
+        if "90th percentile" in d:
+            h["p90"].append(v)
+        for band, mid in BAND_MID_MIN.items():
+            if band in d:
+                h["bands"][mid] = h["bands"].get(mid, 0) + v
+    return {
+        k: {
+            "offload_p90_min": round(sum(v["p90"]) / len(v["p90"]), 1),
+            "offload_mean_min": round(sum(m * n for m, n in v["bands"].items()) / sum(v["bands"].values()), 1),
+            "patients": int(sum(v["bands"].values())),
+            "months": f"{months[-1][:7]} to {months[0][:7]}",
+        }
+        for k, v in out.items() if v["p90"] and v["bands"]
+    }
+
+
 def fetch_hospitals():
     import osmnx as ox
 
     g = ox.features_from_place("San Francisco, California, USA", tags={"amenity": "hospital"}).to_crs(4326)
+    osm = [(str(r.get("name")), r.geometry.centroid) for _, r in g.iterrows()]
+    offload = fetch_offload()
     out = []
-    for _, r in g.iterrows():
-        if r.get("emergency") == "yes":
-            c = r.geometry.centroid
-            out.append({"name": r.get("name"), "lat": round(c.y, 6), "lon": round(c.x, 6)})
+    for abbrev, (needle, general) in HOSPITALS.items():
+        match = [(n, c) for n, c in osm if needle in n]
+        if not match or abbrev not in offload:
+            print(f"hospital skipped: {abbrev}")
+            continue
+        name, c = match[0]
+        out.append({"name": name, "abbrev": abbrev, "general": general, "lat": round(c.y, 6), "lon": round(c.x, 6), **offload[abbrev]})
     return out
 
 
@@ -185,7 +231,7 @@ def main():
 
     hospitals = fetch_hospitals()
     (DATA / "hospitals.json").write_text(json.dumps(hospitals, indent=1))
-    print(f"hospitals with emergency departments: {len(hospitals)}, transported calls: {int(calls['transported'].sum())}")
+    print(f"hospitals: {len(hospitals)} ({sum(h['general'] for h in hospitals)} general), transported calls: {int(calls['transported'].sum())}")
 
     cams = fetch_cameras()
     (DATA / "cameras.json").write_text(json.dumps(cams, indent=1))
