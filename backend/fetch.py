@@ -11,7 +11,7 @@ SODA = "https://data.sf.gov/resource/nuek-vuh3.json"
 CALTRANS = "https://cwwp2.dot.ca.gov/data/d4/cctv/cctvStatusD04.json"
 WEEKS = 5
 FIELDS = [
-    "call_number", "unit_id", "received_dttm", "dispatch_dttm", "response_dttm",
+    "call_number", "unit_id", "received_dttm", "entry_dttm", "dispatch_dttm", "response_dttm",
     "on_scene_dttm", "transport_dttm", "hospital_dttm", "available_dttm", "case_location", "station_area",
     "neighborhoods_analysis_boundaries", "priority", "call_type",
 ]
@@ -65,7 +65,7 @@ def build_calls(rows, start):
     raw = pd.DataFrame(rows)
     df = raw.copy()
     df = df.dropna(subset=["on_scene_dttm", "response_dttm", "dispatch_dttm", "case_location", "station_area"])
-    for c in ["received_dttm", "dispatch_dttm", "response_dttm", "on_scene_dttm", "hospital_dttm", "available_dttm"]:
+    for c in ["received_dttm", "entry_dttm", "dispatch_dttm", "response_dttm", "on_scene_dttm", "hospital_dttm", "available_dttm"]:
         df[c] = pd.to_datetime(df[c])
     df["lon"] = df["case_location"].map(lambda p: p["coordinates"][0])
     df["lat"] = df["case_location"].map(lambda p: p["coordinates"][1])
@@ -86,6 +86,7 @@ def build_calls(rows, start):
         "station_area": first["station_area"],
         "priority": first["priority"].fillna(""),
         "processing_s": secs("dispatch_dttm", "received_dttm"),
+        "entry_s": secs("entry_dttm", "received_dttm"),
         "turnout_s": secs("response_dttm", "dispatch_dttm"),
         "drive_s": secs("on_scene_dttm", "response_dttm"),
         "busy_s": secs("available_dttm", "dispatch_dttm"),

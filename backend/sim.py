@@ -289,7 +289,7 @@ def load_calls(split=None):
     return calls.to_dict("records")
 
 
-def simulate(world, calls, policy, trace=False, offload_cap_s=None):
+def simulate(world, calls, policy, trace=False, offload_cap_s=None, dispatch_at_entry=False):
     policy = load_policy(policy, world)
     n_posts = len(world.post_nodes)
     busy = {u: 0 for u in world.units}
@@ -303,9 +303,11 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None):
     eta = make_eta(world, tokens)
     prev = dict(post)
     arrive = {u: 0 for u in world.units}
-    dispatch_t = epoch([c["t"] for c in calls]) + np.array([c["processing_s"] for c in calls])
+    processing = [min(c["processing_s"], c["entry_s"]) if dispatch_at_entry and c.get("entry_s") == c.get("entry_s") and c.get("entry_s") is not None and c["entry_s"] >= 0 else c["processing_s"] for c in calls]
+    dispatch_t = epoch([c["t"] for c in calls]) + np.array(processing)
     for i in np.argsort(dispatch_t, kind="stable"):
         c, t = calls[i], int(dispatch_t[i])
+        proc = processing[i]
         pos = lambda u, when: post[u] if when >= arrive[u] else prev[u]
         at = lambda u: pos(u, t)
         while bi < len(bg) and bg[bi][0] <= t:
@@ -368,7 +370,7 @@ def simulate(world, calls, policy, trace=False, offload_cap_s=None):
                 "units_at_closest_post": {u: state(u) for u in world.units if at(u) == best_post},
                 "from_post_area": world.posts[origin]["station_area"] if world.posts else None,
             }
-        response = c["processing_s"] + wait + c["turnout_s"] + drive
+        response = proc + wait + c["turnout_s"] + drive
         after = max(c["busy_s"] - c["turnout_s"] - c["drive_s"], MIN_ON_SCENE_S)
         hosp = c.get("hospital_s")
         if offload_cap_s is not None and hosp == hosp and hosp is not None and hosp > offload_cap_s:
@@ -648,6 +650,10 @@ def self_check():
     rr, _ = simulate(wc, [{**kh[0]}, {**kc[1], "t": "2026-01-01T12:32:00"}], Home, offload_cap_s=1200.0)
     assert rq[1]["wait_s"] > 0 and rr[1]["wait_s"] == 0, (rq[1], rr[1])
 
+    ke = [{**kc[0], "entry_s": 20.0}]
+    assert simulate(wc, ke, Home, dispatch_at_entry=True)[0][0]["response_s"] == 20 + 10 + 400
+    assert simulate(wc, ke, Home)[0][0]["response_s"] == 60 + 10 + 400
+
     class Bad(Base):
         @staticmethod
         def choose_unit(call, idle, eta):
@@ -783,6 +789,7 @@ def main():
     ap.add_argument("--worst", type=int, metavar="N")
     ap.add_argument("--fit-speeds", action="store_true")
     ap.add_argument("--offload-cap", type=float, metavar="MINUTES")
+    ap.add_argument("--dispatch-at-entry", action="store_true")
     ap.add_argument("--jam-test", metavar="CAMERA_ID")
     ap.add_argument("--slowdown", type=float, default=4.0)
     a = ap.parse_args()
@@ -810,11 +817,13 @@ def main():
             print(json.dumps(pick_slow(world), indent=1))
         return
     calls = load_calls(a.split)
-    if a.offload_cap is not None:
+    if a.offload_cap is not None or a.dispatch_at_entry:
         base, _ = simulate(world, calls, a.policy)
-        capped, _ = simulate(world, calls, a.policy, offload_cap_s=a.offload_cap * 60)
+        cap = a.offload_cap * 60 if a.offload_cap is not None else None
+        capped, _ = simulate(world, calls, a.policy, offload_cap_s=cap, dispatch_at_entry=a.dispatch_at_entry)
         print(json.dumps({
             "offload_cap_min": a.offload_cap,
+            "dispatch_at_entry": a.dispatch_at_entry,
             "policy": Path(a.policy).stem,
             "split": a.split,
             "now": summarize(base, "now", a.split),
