@@ -25,6 +25,28 @@ h2 {
 }
 .brand h1 { font-size: 1.25rem; letter-spacing: -0.01em; }
 .brand p { margin: 2px 0 0; color: var(--muted); font-size: 0.85rem; }
+.source {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  background: var(--bg);
+}
+.source.api { color: #0b7a4b; background: #e3f4ec; }
+
+.toggle { display: inline-flex; margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.toggle button {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 4px 12px;
+  border: 0;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.toggle button + button { border-left: 1px solid var(--border); }
+.toggle button[aria-pressed='true'] { background: var(--ink); color: var(--surface); }
+.toggle button:disabled { color: var(--muted); cursor: default; }
 
 .compare { display: flex; gap: 28px; }
 .compare-col { display: flex; align-items: center; gap: 16px; }
@@ -144,7 +166,6 @@ h2 {
 @keyframes pulse { 50% { opacity: 0.35; } }
 .cam-pop { display: grid; gap: 6px; }
 .cam-pop img { width: 100%; border-radius: 4px; background: #000; }
-.loading { display: grid; place-items: center; height: 100dvh; color: var(--muted); }
 
 /* phone */
 @media (max-width: 820px) {
