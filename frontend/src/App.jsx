@@ -125,7 +125,8 @@ const gain = (diff) => mmss(Math.abs(diff))
 
 const LEARNING = Object.values(import.meta.glob('../../fixtures/engines_learning.json', { import: 'default', eager: true }))[0]
 const LEARN_HOLD_MS = 2500
-const LEARN_SETTLED_S = 600
+const RACE_S = 1200
+const RACE_MS = 2400
 
 function useLearning(playback) {
   const [step, setStep] = useState(null)
@@ -139,18 +140,32 @@ function useLearning(playback) {
   useEffect(() => {
     if (step && playing) toggle()
   }, [step, playing, toggle])
+  const version = shown?.version
   const calls = useMemo(() => {
-    const r = shown && LEARNING?.response_s[shown.version]
-    return r && LEARNING.calls.map((c, i) => ({ ...c, start: DAY_S - r[i] - LEARN_SETTLED_S, response_s: r[i] }))
-  }, [shown])
-  return { onLearn: setStep, calls, step: shown }
+    const rows = version && LEARNING?.versions[version]
+    return rows && LEARNING.calls.map((c, i) => ({ ...c, start: 0, ...Object.fromEntries(LEARNING.fields.map((f, k) => [f, rows[i][k]])) }))
+  }, [version])
+  const [now, setNow] = useState(0)
+  useEffect(() => {
+    if (!version) return
+    let raf
+    const t0 = performance.now()
+    const tick = (ts) => {
+      const k = Math.min(1, (ts - t0) / RACE_MS)
+      setNow(k * RACE_S)
+      if (k < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [version])
+  return { onLearn: setStep, calls, step: shown, now }
 }
 
-function LearnChip({ step, calls }) {
-  const fast = calls.filter((c) => c.response_s <= 8 * 60).length
+function LearnChip({ step, calls, now }) {
+  const fast = calls.filter((c) => c.response_s <= 8 * 60 && c.response_s <= now).length
   return (
     <p className="learn-chip glass" role="status">
-      {step.n === 0 ? 'Before learning' : `After step ${step.n}`} · <b>{fast}</b> of {calls.length} calls on {dayLabel(LEARNING.day)} reached in 8 min
+      {step.n === 0 ? 'Before learning' : `After step ${step.n}`} · all {calls.length} calls from {dayLabel(LEARNING.day)} at once · <b className="learn-clock">{mmss(now)}</b> in · <b>{fast}</b> reached within 8 min
     </p>
   )
 }
@@ -290,11 +305,11 @@ export default function App() {
   return (
     <div className="app">
       <div className="stage">
-        <CityMap calls={learning.calls ?? (dispatching ? [] : calls)} now={learning.calls ? DAY_S : playback.now} cameras={data.cameras} posts={data.posts}
+        <CityMap calls={learning.calls ?? (dispatching ? [] : calls)} now={learning.calls ? learning.now : playback.now} cameras={data.cameras} posts={data.posts}
           neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}
           onPick={dispatch.pick} result={dispatch.state.result} elapsed={dispatch.elapsed}
           camera={camera} onCamera={setCamera} jam={jam} />
-        {learning.calls && <LearnChip step={learning.step} calls={learning.calls} />}
+        {learning.calls && <LearnChip step={learning.step} calls={learning.calls} now={learning.now} />}
       </div>
       <div className="left">
         <header className="top glass">

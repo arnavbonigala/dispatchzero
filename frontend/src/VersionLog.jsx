@@ -6,7 +6,8 @@ import './VersionLog.css'
 const W = 360
 const H = 110
 const PAD = { l: 40, r: 8, t: 10, b: 10 }
-const PLAY_MS = 450
+const PLAY_MS = 350
+const KEPT_MS = 2900
 
 const metric = (v) => v.train_mean ?? v.train_slow_median
 const parse = (text) => text.trim().split('\n').map((l) => JSON.parse(l))
@@ -110,9 +111,9 @@ export default function VersionLog({ onLearn }) {
       setPlaying(false)
       return
     }
-    const id = setTimeout(() => setSel(at + 1), PLAY_MS)
+    const id = setTimeout(() => setSel(at + 1), pts[at].bestV === pts[at - 1]?.bestV ? PLAY_MS : KEPT_MS)
     return () => clearTimeout(id)
-  }, [playing, at, pts.length])
+  }, [playing, at, pts])
 
   const learnV = playing ? pts[at]?.bestV : null
   const learnN = playing ? pts[at]?.n : null

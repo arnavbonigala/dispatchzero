@@ -140,3 +140,4 @@ h2 { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform:
 }
 .learn-chip b { color: var(--good); font-family: var(--mono); }
 @media (max-width: 900px) { .learn-chip { top: 8px; white-space: normal; width: max-content; max-width: calc(100% - 24px); font-size: 0.75rem; } }
+.learn-chip .learn-clock { color: var(--ink); }
