@@ -20,9 +20,12 @@ EXTRA = []
 SIM_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
+SPREAD_TOLERANCE_S = 5.0
+LESSONS = RUNS / "lessons_ambulance.md"
+LESSONS_IN_PROMPT = 40
 
 GOAL = "Goal: make the 10 slowest neighborhoods faster (their median response time) without making the citywide median more than 5 s slower than baseline."
-ENGINE_GOAL = "Goal: cut the urgency-weighted average time to the first paramedic (weighted_mean_s, where life-threatening calls count double) by more than 60 s versus baseline, while keeping the 10 slowest neighborhoods faster than baseline and keeping fire_delay_s (extra seconds your engine use adds to the fire department's own calls) low. Each candidate must lower the training weighted_mean_s below the current best's."
+ENGINE_GOAL = "Goal: cut the urgency-weighted average time to the first paramedic (weighted_mean_s, where life-threatening calls count double) by more than 60 s versus baseline, while keeping the 10 slowest neighborhoods faster than baseline, not widening the gap between neighborhoods (nbhd_spread_s, the standard deviation of neighborhood medians, must not rise more than 5 s above the current best's), and keeping fire_delay_s (extra seconds your engine use adds to the fire department's own calls) low. Each candidate must lower the training weighted_mean_s below the current best's."
 
 ANGLES = {
     "": ["Focus on where ambulances wait each hour (post_plan).", "Focus on which ambulance to send (choose_unit).",
@@ -63,6 +66,9 @@ Baseline training summary:
 Recent attempts (newest last):
 {history}
 
+Lessons from earlier rounds (newest last):
+{lessons}
+
 {near}Current best policy file:
 <current>
 {code}
@@ -88,6 +94,41 @@ def sim(*args, timeout=SIM_TIMEOUT_S):
     if p.returncode:
         raise RuntimeError((p.stderr or p.stdout).strip().splitlines()[-1])
     return json.loads(p.stdout)
+
+
+REVIEW_SYSTEM = """You review a candidate ambulance dispatch policy before it is tested on real San Francisco 911 calls. Veto it only for one of these:
+- overfitting: rules keyed to specific dates, days, call times or single calls, or thresholds that only make sense for a handful of training calls;
+- rule-breaking: trying to tell which week or split it is in, reconstructing historical outcomes, or using data a dispatcher would not have at dispatch time;
+- fragile hacks: swallowing errors, unbounded loops, or logic that silently returns nonsense when an input is missing.
+Ordinary tuning of thresholds by neighborhood, hour or time bucket is fine. When in doubt, pass.
+Reply exactly: <verdict>pass</verdict> or <verdict>veto</verdict>, then <reason>one short sentence</reason>."""
+
+LESSON_SYSTEM = """You keep a short lab notebook for an AI that improves an ambulance dispatch policy. Given the existing notes and the results of the latest round, write 1 to 3 new bullet lessons: what worked, what failed and why, with numbers. Do not repeat existing notes. Reply with only the bullets, each starting with "- "."""
+
+
+def review(diagnosis, code, model):
+    reply = ask(f"Diagnosis: {diagnosis}\n\n<policy>\n{code}</policy>", REVIEW_SYSTEM, model)
+    v = re.search(r"<verdict>\s*(pass|veto)\s*</verdict>", reply, re.I)
+    r = re.search(r"<reason>(.*?)</reason>", reply, re.S)
+    return {"verdict": v.group(1).lower() if v else "pass", "reason": r.group(1).strip() if r else ""}
+
+
+def lessons(n=LESSONS_IN_PROMPT):
+    lines = [l for l in LESSONS.read_text().splitlines() if l.startswith("- ")] if LESSONS.exists() else []
+    return "\n".join(lines[-n:]) or "(none yet)"
+
+
+def learn(rows, model):
+    keys = ("version", "angle", "diagnosis", "accepted", "reason", "review", "train_mean", "train_weighted_mean", "train_slow_median", "train_spread", "holdout_mean_diff", "holdout_slow_diff")
+    summary = "\n".join(json.dumps({k: r.get(k) for k in keys if r.get(k) is not None}) for r in rows)
+    try:
+        reply = ask(f"Existing notes:\n{lessons()}\n\nLatest round:\n{summary}", LESSON_SYSTEM, model)
+    except (RuntimeError, subprocess.TimeoutExpired):
+        return
+    bullets = [l.strip() for l in reply.splitlines() if l.strip().startswith("- ")][:3]
+    if bullets:
+        with LESSONS.open("a") as f:
+            f.write(f"\n## {datetime.now():%Y-%m-%d %H:%M} {rows[0]['version']}-{rows[-1]['version']}\n" + "\n".join(bullets) + "\n")
 
 
 def contract():
@@ -129,6 +170,8 @@ def gates(train, best_train, holdout=None):
     if EXTRA:
         if train[OBJ] >= best_train[OBJ]:
             return False, f"train: weighted average {train[OBJ]:.0f}s not below best {best_train[OBJ]:.0f}s"
+        if train.get("nbhd_spread_s") is not None and best_train.get("nbhd_spread_s") is not None and train["nbhd_spread_s"] > best_train["nbhd_spread_s"] + SPREAD_TOLERANCE_S:
+            return False, f"train: neighborhood spread {train['nbhd_spread_s']:.0f}s vs best {best_train['nbhd_spread_s']:.0f}s"
         if holdout is not None and holdout[OBJ] >= baseline_summary("holdout")[OBJ]:
             return False, f"holdout: weighted average {holdout[OBJ]:.0f}s not below baseline {baseline_summary('holdout')[OBJ]:.0f}s"
     elif train["slow_median_s"] >= best_train["slow_median_s"]:
@@ -183,7 +226,7 @@ def step(model, k=4):
     best_train = evaluate(best, "train")
     base_train = evaluate("baseline", "train")
     worst = sim("--policy", best, "--split", "train", "--worst", "50")
-    slim = lambda s: {f: s[f] for f in ("slow_median_s", "slow_n", "median_s", "mean_s", "weighted_mean_s", "lt_mean_s", "p90_s", "n", "stats") if f in s}
+    slim = lambda s: {f: s[f] for f in ("slow_median_s", "slow_n", "median_s", "mean_s", "weighted_mean_s", "lt_mean_s", "nbhd_spread_s", "p90_s", "n", "stats") if f in s}
     recent = [{**{k: r.get(k) for k in ("version", "parent", "diagnosis", "accepted", "train_slow_median", "train_all_diff", "train_mean")},
                "reason": "failed the holdout gate" if str(r.get("reason", "")).startswith("holdout") else r.get("reason")} for r in rows[-5:]]
     near = [r for r in rows if str(r.get("reason", "")).startswith("holdout") and (POLICIES / f"{r['version']}.py").exists()]
@@ -193,13 +236,13 @@ def step(model, k=4):
     context = dict(
         slow=", ".join(json.loads((ROOT / "data" / "slow_nbhds.json").read_text())["nbhds"]),
         best=best, summary=json.dumps(slim(best_train)), base=json.dumps(slim(base_train)),
-        history="\n".join(json.dumps(r) for r in recent), near=near, code=(POLICIES / f"{best}.py").read_text(),
+        history="\n".join(json.dumps(r) for r in recent), lessons=lessons(), near=near, code=(POLICIES / f"{best}.py").read_text(),
         worst=json.dumps({key: v for key, v in worst.items() if key != "summary"}))
     system = SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else "", hints="" if EXTRA else MOVE_HINTS, goal=ENGINE_GOAL if EXTRA else GOAL)
     angles = ANGLES["engines" if EXTRA else ""]
     names = next_names(k)
     with ThreadPoolExecutor(k) as pool:
-        done = list(pool.map(lambda i: candidate(names[i], best, best_train, PROMPT.format(**context, angle=angles[i % len(angles)]), system, model), range(k)))
+        done = list(pool.map(lambda i: candidate(names[i], best, best_train, angles[i % len(angles)], PROMPT.format(**context, angle=angles[i % len(angles)]), system, model), range(k)))
     passed = [(row, train) for row, train, ok in done if ok]
     winner = min(passed, key=lambda p: objective(p[1]), default=(None, None))[0]
     for row, _, ok in done:
@@ -208,17 +251,22 @@ def step(model, k=4):
         if row is winner:
             row["frozen_median"] = sim("--policy", row["version"], "--split", "frozen")["median_s"]
         record(row)
+    learn([r for r, _, _ in done], model)
 
 
-def candidate(name, best, best_train, prompt, system, model):
-    row = {"version": name, "parent": best, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
+def candidate(name, best, best_train, angle, prompt, system, model):
+    row = {"version": name, "parent": best, "angle": angle, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
     train, ok = None, False
     try:
         row["diagnosis"], code = parse(ask(prompt, system, model))
         (POLICIES / f"{name}.py").write_text(code)
+        row["review"] = review(row["diagnosis"], code, model)
+        if row["review"]["verdict"] == "veto":
+            row["reason"] = f"vetoed by reviewer: {row['review']['reason']}"
+            return row, None, False
         train = evaluate(name, "train")
         row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"], "train_mean": train["mean_s"],
-                "train_weighted_mean": train.get("weighted_mean_s"), "train_fire_delay_s": train["stats"].get("fire_delay_s")}
+                "train_weighted_mean": train.get("weighted_mean_s"), "train_fire_delay_s": train["stats"].get("fire_delay_s"), "train_spread": train.get("nbhd_spread_s")}
         ok, why = gates(train, best_train)
         if ok:
             holdout = evaluate(name, "holdout")
@@ -259,8 +307,8 @@ def headline():
     best = next(r["version"] for r in reversed(history()) if r["accepted"])
     s = evaluate(best, "frozen")
     b = sim("--policy", "baseline", "--split", "frozen")
-    keys = ("slow_median_s", "median_s", "mean_s", "p90_s", "actual_median_s", "n")
-    out = {"version": best, "frozen": {k: s[k] for k in keys}, "baseline": {k: b[k] for k in keys}, "vs_baseline": s["vs_baseline"]}
+    keys = ("slow_median_s", "median_s", "mean_s", "weighted_mean_s", "lt_mean_s", "nbhd_spread_s", "p90_s", "actual_median_s", "n")
+    out = {"version": best, "frozen": {k: s.get(k) for k in keys}, "baseline": {k: b.get(k) for k in keys}, "vs_baseline": s["vs_baseline"]}
     RUNS.mkdir(exist_ok=True)
     HEADLINE.write_text(json.dumps(out, indent=1))
     if EXTRA:
@@ -277,6 +325,8 @@ def snapshot(best):
         (FIXTURES / f"{name}.json").write_text(json.dumps({"version": version, "summary": d["summary"], "results": tuesday}))
     (FIXTURES / "engines_headline.json").write_text(HEADLINE.read_text())
     (FIXTURES / "engines_versions.jsonl").write_text(VERSIONS.read_text())
+    if LESSONS.exists():
+        (FIXTURES / "engines_lessons.md").write_text(LESSONS.read_text())
 
 
 def main():
@@ -289,8 +339,8 @@ def main():
     ap.add_argument("--candidates", type=int, default=4)
     a = ap.parse_args()
     if a.engines:
-        global VERSIONS, HEADLINE, PREFIX, EXTRA
-        VERSIONS, HEADLINE, PREFIX, EXTRA = RUNS / "engines.jsonl", RUNS / "engines_headline.json", "e", ["--engines"]
+        global VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS
+        VERSIONS, HEADLINE, PREFIX, EXTRA, LESSONS = RUNS / "engines.jsonl", RUNS / "engines_headline.json", "e", ["--engines"], RUNS / "lessons_engines.md"
     if not history():
         seed()
     if a.rescore:
