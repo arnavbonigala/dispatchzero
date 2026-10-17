@@ -6,7 +6,9 @@ We're picking a hackathon idea modeled on the winners of the MongoDB SFTW galler
 
 **Golden Minute** is a self-improving ambulance dispatcher. Claude writes the dispatch policy as code, replays real San Francisco 911 medical calls through a simulator, diagnoses its slowest responses from the data, and rewrites itself. A new version ships only if it beats the current one on a frozen week it never trained on. Live Caltrans freeway cameras feed congestion into routing, so dispatch reacts to real traffic.
 
-**The one result the demo exists to show:** "On a real week of SF ambulance calls it never saw, the agent's policy reaches patients X seconds faster at the median than the baseline policy, in the same simulator, calibrated to SF's actual response times."
+**The one result the demo exists to show:** "On a real week of SF ambulance calls it never saw, the agent's policy reaches patients in SF's 10 slowest neighborhoods X seconds faster, without slowing the rest of the city, in a simulator calibrated to SF's actual response times."
+
+**The goal (locked):** the 10 slowest neighborhoods under the baseline (picked from training weeks, saved in `data/slow_nbhds.json`: Visitacion Valley, Haight Ashbury, Excelsior, Oceanview/Merced/Ingleside, Lakeshore, Inner Richmond, Outer Richmond, Sunset/Parkside, West of Twin Peaks, Portola) must get faster with the 95% CI below zero, and the citywide median may get at most 5 s slower. Why this goal: testing showed repositioning can only move the citywide average by about 5 to 10 s (within noise), while the slowest neighborhoods have 25 to 40 s of real room. A hand-written "move 3 spare downtown units outward" policy already passes: slow neighborhoods −24 s on the holdout week (CI −41 to −7), everyone else +4 s.
 
 No sponsor tools are required, so storage is local files.
 
@@ -90,7 +92,7 @@ def choose_unit(call: dict, idle: list[dict], eta) -> str              # eta(uni
 1. Run the current best on training weeks and collect the summary plus the 50 worst calls, each with context (hour, neighborhood, which unit went, from where, nearest idle unit and its ETA).
 2. Prompt Claude (latest Sonnet for speed) with the current policy code, the summary, the worst calls, and the last 5 diagnoses from `versions.jsonl`. It returns a diagnosis plus the full new policy file.
 3. Run the candidate in a subprocess with a timeout. Reject it on a crash or a timeout.
-4. Gate 1: it must beat the current best on the training weeks. Gate 2: it must also beat the current best on the **holdout week** (week 4). Only then is it promoted. The frozen week (week 5) is evaluated once, for the final headline, with `sim.py --compare baseline` (paired bootstrap CI).
+4. Gate 1: on the training weeks it must lower the slow-neighborhood median versus the current best without raising the citywide median more than 5 s versus baseline. Gate 2: the same check on the **holdout week** (week 4), using `sim.py --compare` (`passes` must be true). Only then is it promoted. The frozen week (week 5) is evaluated once, for the final headline, with `sim.py --compare baseline` (paired bootstrap CI).
 5. Append `{version, parent, diagnosis, train_median, frozen_median, accepted}` to `versions.jsonl`.
 6. Run 6 to 10 iterations before the demo, and keep the run log; this becomes the improvement chart.
 
@@ -124,7 +126,7 @@ Each person runs Claude Code agents in parallel on sub-pieces. C starts before t
 |---|---|---|---|---|
 | 0:00–0:20 | Together: freeze the contracts, repo skeleton, `fetch.py` starts downloading | | | Contracts committed |
 | 0:20–1:30 | `fetch.py` done; `sim.py` with baseline policy; calibration | `cameras.py` reads 1 Caltrans HLS stream → YOLO counts and `moving_frac` | `agent.py` loop against the stub: prompt, subprocess runner with timeout, both gates, `versions.jsonl`; FastAPI serving fixture JSON | **1:30 go/no-go:** baseline sim median within 10% of actual, otherwise switch to straight-line × factor |
-| 1:30–2:45 | Sim speed-up (cached post Dijkstras), `--self-check`, worst-50 context for the agent; **stretch:** learned road speeds (skip if calibration missed the checkpoint) | 10 cameras live, slowdown formula, React map + replay from fixtures, camera markers | Swap stub for real `sim.py`; first 3 real iterations; tune the prompt on real diagnoses | At least one accepted version beats baseline on the frozen week |
+| 1:30–2:45 | Sim speed-up (cached post Dijkstras), `--self-check`, worst-50 context for the agent; **stretch:** learned road speeds (skip if calibration missed the checkpoint) | 10 cameras live, slowdown formula, React map + replay from fixtures, camera markers | Swap stub for real `sim.py`; first 3 real iterations; tune the prompt on real diagnoses | At least one accepted version passes the goal on the holdout week |
 | 2:45–3:45 | Wire `edge_slowdowns()` into sim; with/without-jam test | Record rush-hour jam clips + replay mode; wire UI to real API; "dispatch now" panel | 6–10 iterations in the background; version chart + diagnosis feed; draft pitch with real numbers | Full loop visible in the UI |
 | 3:45–4:30 | Freeze the policy version. Rehearse together, fix the flakiest piece, cut whatever isn't working (cameras first) | | | Demo runs 3 times cleanly |
 | 4:30–5:00 | README | Backup video | Final pitch | Submitted |
@@ -149,11 +151,12 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] `sim.py --self-check` passing
 - [x] Simulator hardened against cheating policies (source check, opaque call ids, validated choices, relocation and return-drive costs)
 - [x] Holdout week split; paired bootstrap CI via `--compare`
+- [x] Slow-neighborhood goal locked in: `slow_nbhds.json`, `slow_median_s` in every summary, `--compare` returns `passes`
 - [x] Worst-50 calls with context for the agent (`sim.py --worst 50`)
-- [x] Stretch: learned road speeds, gated on the holdout week: error 287s → 244s, adopted
-- [ ] `edge_slowdowns()` wired into the simulator
-- [ ] With/without-jam test
-- [ ] README
+- [x] Stretch: learned road speeds, gated on the holdout week: error 206s → 196s, adopted
+- [x] `edge_slowdowns()` wired into the simulator, plus `Roads.path()` for drawing routes
+- [x] With/without-jam test (`sim.py --jam-test CAMERA_ID`): freeway jams rarely touch in-city ambulance routes
+- [x] README
 
 ### B: cameras and UI
 - [ ] `cameras.py` reads one Caltrans HLS stream → YOLO vehicle count and `moving_frac`
@@ -171,23 +174,23 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] FastAPI serving fixture JSON, falling back from `backend/runs/`
 - [x] Swap the stub for the real `sim.py` (agent evaluates with `sim.simulate` directly)
 - [ ] First 3 real iterations, prompt tuned
-- [ ] At least one version beats baseline on the frozen week
+- [ ] At least one version passes the slow-neighborhood goal on the holdout week
 - [ ] 6 to 10 iterations run, final version frozen
 - [x] Version chart and diagnosis feed in the UI (`frontend/src/agent/`)
 - [ ] Pitch with real numbers
 
 ### Checkpoints
 - [x] 1:30 go/no-go: calibration within 10%
-- [ ] 2:45: an accepted version beats baseline on the frozen week
+- [ ] 2:45: an accepted version passes the goal on the holdout week
 - [ ] 3:45: full loop visible in the UI
 - [ ] 4:30: demo runs 3 times cleanly
 - [ ] 5:00: submitted
 
 ## Demo script (3 minutes)
 
-1. **Hook (20s):** "In a cardiac arrest, every minute without care cuts survival by about 10%. SF's ambulance median is X minutes."
+1. **Hook (20s):** "In a cardiac arrest, every minute without care cuts survival by about 10%. In SF, where you live decides how long you wait: the slowest neighborhoods wait about 3.5 minutes longer than downtown."
 2. **The loop (60s):** show the version chart. Read one diagnosis aloud, for example "Bayview had no idle unit at 6pm weekdays; repositioning M509." Show the improvement and the rejected candidates that failed the frozen-week gate.
-3. **The result (40s):** split-screen replay of a frozen-week Tuesday with the two medians. State the headline number and the calibration error.
+3. **The result (40s):** split-screen replay of a frozen-week Tuesday, slow neighborhoods highlighted, with their median under each side plus the citywide median. State the headline number and the calibration error.
 4. **Live cameras (40s):** Caltrans feed of a 101 jam (live or a clip recorded at rush hour). The segment turns red. A new call reroutes, and the reason appears on screen.
 5. **Close (20s):** what's next: real road speeds, fire engines, integration with dispatch centers.
 

@@ -22,7 +22,7 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | `backend/contracts.py` | All | Frozen shapes: `Call`, `IdleUnit`, `CallResult`, `Summary`, `Version`, `CameraReading`, policy signatures |
 | `backend/fetch.py` | A | Data download |
-| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--self-check`, `--fixtures` |
+| `backend/sim.py` | A | `replay(calls, policy, slowdowns, version, split) -> (results, summary)`. Replays real calls over the OSM road graph with unit shifts, background load, queueing and relocation time. CLI: `--policy NAME_OR_PATH --split train\|holdout\|fit\|frozen [--compare baseline] [--out FILE]`, `--calibrate`, `--fit-speeds`, `--worst N`, `--jam-test CAMERA_ID [--slowdown F]`, `--self-check`, `--fixtures` |
 | `backend/policies/baseline.py` | A | Reference policy: each unit at its home post, closest idle unit sent |
 | `backend/agent.py` | C | Improvement loop: `--iters N [--backend api\|cli\|stub]`, `--final`. Writes `backend/policies/vNNN.py` and `backend/runs/versions.jsonl` |
 | `backend/api.py` | C | FastAPI for the UI (`uvicorn api:app --port 8000` from `backend/`) |
@@ -39,14 +39,33 @@ def post_plan(hour: int, units: list[str]) -> dict[str, int]
 def choose_unit(call: Call, idle: list[IdleUnit], eta) -> str
 ```
 
-`eta(unit, call)` returns drive seconds from the unit's post to the call. The module also gets two injected globals: `HOME` (unit to home post) and `POSTS` (list of `{post, station_area, lat, lon}`).
+`post_plan` is called at every hour boundary with the units on shift at that moment; units it leaves out keep their current post. `eta(unit, call)` returns drive seconds from the unit's current position to the call.
+
+Injected globals:
+- `HOME`: unit to home post (the baseline layout, see below)
+- `POSTS`: list of `{post, station_area, lat, lon}`
+- `DEMAND`: `{bucket: {post: calls}}` from the training weeks, each call counted at its nearest post
+- `POST_DRIVE`: road drive seconds between posts, `POST_DRIVE[from][to]`
+- `BUCKET_OF`: hour to time bucket (`night`, `morning_rush`, `midday`, `evening_rush`, `evening`)
 
 Rules the simulator enforces:
 - Policies only see dispatcher-visible call fields: an opaque per-run `call_id`, `t`, `lat`, `lon`, `hour`, `nbhd`, `station_area`, `priority`.
 - Source is checked before loading: imports limited to `math`, `statistics`, `collections`, `itertools`, `functools`, `heapq`, `bisect`, `random`; no file access, `eval`/`exec`, `getattr`, or underscore attributes. Violations raise `PolicyRejected`.
 - `choose_unit` must return an idle unit's id. Anything else, or an exception, falls back to the closest idle unit and is counted in `stats`.
-- Moving a unit to a new post in `post_plan` costs its drive time between posts, starting at the hour boundary.
+- Moving a unit to a new post takes its drive time between posts, starting at the hour boundary. It stays available while moving and is dispatched from its old post until it arrives.
 - After each call the unit drives back to its post before it is available again.
+
+## Baseline
+
+`units.json` spreads the 57 units across posts in proportion to training-week call volume by station area (largest remainder). The baseline policy keeps every unit at that home post and sends the closest idle unit. `unit_areas.json` keeps each unit's most frequent station area, used only to fit road speeds.
+
+## The goal
+
+The agent's job is to make SF's 10 slowest neighborhoods faster without slowing everyone else. `sim.py --calibrate` picks them from the baseline on the training weeks and saves `data/slow_nbhds.json`. Every summary includes `slow_median_s` and `slow_n`. `--compare baseline` returns:
+
+- `slow_nbhds`: paired median difference and 95% CI for calls in those neighborhoods
+- `everyone`: the same for all calls
+- `passes`: true when the slow-neighborhood CI is entirely below zero and the citywide median is at most 5 s slower (`OVERALL_TOLERANCE_S`)
 
 ## Splits and reporting
 
@@ -56,13 +75,26 @@ Rules the simulator enforces:
 
 ## Calibration
 
-OSM speed-limit travel times are scaled by one factor per time-of-day bucket so the baseline policy's simulated median drive time matches SF's actual median on the training weeks. Fit on weeks 1 to 4 with learned road speeds: baseline sim median 679s vs actual 663s (+2.4%); frozen week 679s vs 658s (+3.2%). Bucket factors are about 1.7 to 2.1.
+Simulated drive = OSM road time × learned neighborhood multiplier + one offset per time bucket. The offsets (about 290 to 340s) are fit so the baseline's median simulated drive matches SF's median real drive on weeks 1 to 4. They stand for everything the road graph misses, mostly units not sitting exactly at their post. Because the offset is additive, seconds saved by better positioning count 1:1 and are not amplified.
+
+Current fit: baseline sim median 657s vs actual 663s on weeks 1 to 4 (−1.0%); frozen week 664s vs 658s (+0.9%).
+
+Limits to state honestly: SF publishes no unit locations, so the simulator assumes idle units wait at posts. Per-call simulated drive time correlates only weakly with real drive time (Spearman 0.14, median absolute error about 205s). Medians match; individual calls don't. Present gains as simulator-relative estimates calibrated to SF's real medians.
 
 ## Learned road speeds
 
-`--fit-speeds` learns one multiplier per (destination neighborhood × time bucket), about 200 cells, from each training call's real drive time against the route time from the dispatched unit's home post. Cells with few calls are shrunk toward 1 (weight 30 calls). The multipliers are adopted only if they lower the median drive-time error on the holdout week, then calibration is re-run. Current result: holdout error 287s → 244s (adopted). Fastest: Sunset/Parkside (~0.67×); slowest: Tenderloin and South of Market (2.5 to 3.7×, which also reflects units rarely being at their post downtown).
+`--fit-speeds` learns one multiplier per (destination neighborhood × time bucket), about 200 cells, in the additive model: `real drive ≈ route time from the unit's usual post × multiplier + bucket offset`, fit on weeks 1 to 3. Cells with few calls shrink toward 1 (weight 30 calls), and multipliers are capped to 0.5 to 2×. They are adopted only if they lower median drive-time error on the holdout week, then calibration is re-run. Current result: holdout error 206s → 196s (adopted). Fastest: Outer Richmond, Bernal Heights, Sunset (about 0.72×); slowest: Tenderloin (capped at 2×).
 
 `data/speeds.json` holds `adopted`, the error `report`, `rel` (`"Neighborhood|bucket": multiplier`), and `nbhd_centers` (`"Neighborhood": [lat, lon]`) for the UI heatmap.
+
+## Cameras in the simulator
+
+- `edge_slowdowns(readings, roads)` turns `CameraReading`s into `{edge_index: factor}`: road edges within 600 m of the camera whose OSM `ref` matches the camera's route (`US-101` → `US 101`, `SR-1` → `CA 1`) are slowed by the camera's `slowdown`. Readings with `slowdown <= 1` change nothing.
+- `World.load(slowdowns=...)` rebuilds travel times with those slowdowns.
+- `Roads.path(src_node, dst_node, slowdowns)` returns `(seconds, [[lat, lon], ...])` for drawing a route on the map.
+- `--jam-test CAMERA_ID` measures the direct effect of a jam on the holdout week: calls whose best route crosses the jam, calls that should be sent from a different post, and seconds saved by switching versus dispatching blind.
+
+Finding: in-city ambulance routes rarely use the freeways Caltrans covers. At 4× slowdown, most SF cameras affect 0 to 14 calls a week; SR-1 near the Presidio Tunnel is the clearest case (2 calls switched, about 128 s saved each). Camera value is mostly a live-demo story, not a measurable weekly gain.
 
 ## Agent context
 
