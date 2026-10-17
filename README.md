@@ -132,7 +132,7 @@ A policy can add:
 def send_engine(call: Call, engines: list[IdleUnit], eta, ambulance_s: float) -> str | None
 ```
 
-`engines` are idle paramedic engines (`kind: "engine"`, so `eta` uses engine timing), `ambulance_s` is the chosen ambulance's time from dispatch to scene, and `ENGINES` (engine to station post) is injected. Without `send_engine`, the simulator sends the nearest idle engine exactly when history did. `stats.engine_conflicts` counts real engine calls that start while the simulator has that engine on a medical call, which is the price of sending more.
+`engines` are idle paramedic engines (`kind: "engine"`, so `eta` uses engine timing), `ambulance_s` is the chosen ambulance's time from dispatch to scene, and `ENGINES` (engine to station post) and `ENGINE_LOAD` (`"E01|15"`: that engine's other dispatches per day in that hour, from the fit weeks) are injected. Without `send_engine`, the simulator sends the nearest idle engine exactly when history did. `stats.engine_conflicts` counts real engine calls that start while the simulator has that engine on a medical call, which is the price of sending more.
 
 Frozen week, first paramedic on scene, paired against the baseline:
 
@@ -140,6 +140,7 @@ Frozen week, first paramedic on scene, paired against the baseline:
 |---|---|---|---|---|
 | Baseline (history's engine use) | 557 s | | 37% | 24 |
 | `reference_engine_3min`: send if 3+ min ahead of the ambulance | −75 s (CI −90 to −63) | −123 s (CI −147 to −88) | 49% | 54 |
+| `reference_engine_load`: send if ahead by 30 s plus 10 min per daily call the engine usually gets that hour | −71 s (CI −85 to −60) | −137 s (CI −160 to −105) | 48% | 45 |
 | `reference_engine`: send if ahead of the ambulance | −127 s (CI −140 to −116) | −148 s (CI −169 to −115) | 66% | 90 |
 
 ## Agent context
