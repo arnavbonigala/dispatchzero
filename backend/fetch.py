@@ -100,7 +100,7 @@ def build_calls(rows, start):
     )
     calls = calls[ok].sort_values("t").reset_index(drop=True)
     calls["week"] = ((pd.to_datetime(calls["t"]) - pd.Timestamp(start)).dt.days // 7).astype(int)
-    calls["split"] = calls["week"].map(lambda w: "frozen" if w == WEEKS - 1 else "train")
+    calls["split"] = calls["week"].map(lambda w: "frozen" if w == WEEKS - 1 else "holdout" if w == WEEKS - 2 else "train")
 
     posts = [
         {"post": i, "station_area": r.station_area, "lat": r.lat, "lon": r.lon}
