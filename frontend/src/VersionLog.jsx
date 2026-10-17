@@ -42,6 +42,7 @@ function Chart({ versions }) {
 }
 
 function why(reason = '') {
+  if (reason.startsWith('beaten by')) return 'Another idea this round did better'
   if (reason.includes('engine conflicts')) return 'Tied up too many fire engines'
   if (reason.includes('citywide')) return 'Slowed down the rest of the city'
   if (reason.startsWith('holdout')) return 'Did not hold up on a new week'
