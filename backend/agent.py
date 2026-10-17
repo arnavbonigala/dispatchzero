@@ -11,6 +11,9 @@ POLICIES = BACKEND / "policies"
 RUNS = ROOT / "runs"
 VERSIONS = RUNS / "versions.jsonl"
 PY = sys.executable
+HEADLINE = RUNS / "headline.json"
+PREFIX = "v"
+EXTRA = []
 SIM_TIMEOUT_S = 120
 LLM_TIMEOUT_S = 600
 OVERALL_TOLERANCE_S = 5.0
@@ -27,7 +30,7 @@ You control two functions in one Python file:
 
 {contract}
 
-Reply with exactly two sections:
+{engines}Reply with exactly two sections:
 <diagnosis>At most two short sentences, no caveats and no mention of testing: the specific problem you found in the data (name neighborhoods, hours, posts or units) and the change you made.</diagnosis>
 <policy>
 the complete new policy file, plain Python, no markdown fences
@@ -56,8 +59,17 @@ Worst training calls under the current best, with context. `avoidable_s` is cont
 Find one concrete improvement and write the new policy."""
 
 
+ENGINE_NOTE = """Engine mode: the score is the time until the first paramedic is on scene, by ambulance or by fire engine. You may also define
+
+def send_engine(call, engines, eta, ambulance_s) -> str | None
+
+`engines` lists idle paramedic fire engines as {{unit_id, post, kind: "engine"}}; `eta(engine, call)` is that engine's seconds from dispatch to scene; `ambulance_s` is the chosen ambulance's seconds from dispatch to scene. Return an engine id to send it, or None. Injected globals: `ENGINES` (engine to its station post) and `ENGINE_LOAD` ("E01|15": that engine's own fire and other dispatches per day in that hour). Without send_engine, an engine goes only when history sent one. A sent engine is busy for about 10 minutes on scene, so it can miss its own fire calls: `stats.engine_conflicts` counts real engine calls that start while your policy has that engine busy, and a candidate with more than twice the baseline's conflicts is rejected.
+
+"""
+
+
 def sim(*args, timeout=SIM_TIMEOUT_S):
-    p = subprocess.run([PY, str(BACKEND / "sim.py"), *args], capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run([PY, str(BACKEND / "sim.py"), *args, *EXTRA], capture_output=True, text=True, timeout=timeout)
     if p.returncode:
         raise RuntimeError((p.stderr or p.stdout).strip().splitlines()[-1])
     return json.loads(p.stdout)
@@ -94,6 +106,11 @@ def evaluate(name, split):
 
 
 def gates(train, best_train, holdout=None):
+    for s in [train] + ([holdout] if holdout else []):
+        if "engine_conflicts" in s["stats"]:
+            base = baseline_conflicts(s["split"])
+            if s["stats"]["engine_conflicts"] > 2 * base:
+                return False, f"{s['split']}: {s['stats']['engine_conflicts']} engine conflicts vs baseline {base}"
     if train["slow_median_s"] >= best_train["slow_median_s"]:
         return False, f"train: slow median {train['slow_median_s']:.0f}s not below best {best_train['slow_median_s']:.0f}s"
     if train["vs_baseline"]["everyone"]["median_diff_s"] > OVERALL_TOLERANCE_S:
@@ -104,6 +121,12 @@ def gates(train, best_train, holdout=None):
     return True, "passed train and holdout"
 
 
+def baseline_conflicts(split, cache={}):
+    if split not in cache:
+        cache[split] = sim("--policy", "baseline", "--split", split)["stats"]["engine_conflicts"]
+    return cache[split]
+
+
 def record(row):
     RUNS.mkdir(exist_ok=True)
     with VERSIONS.open("a") as f:
@@ -112,8 +135,8 @@ def record(row):
 
 
 def next_name():
-    nums = [int(p.stem[1:]) for p in POLICIES.glob("v[0-9][0-9][0-9].py")]
-    return f"v{max(nums, default=0) + 1:03d}"
+    nums = [int(p.stem[1:]) for p in POLICIES.glob(f"{PREFIX}[0-9][0-9][0-9].py")]
+    return f"{PREFIX}{max(nums, default=0) + 1:03d}"
 
 
 def seed():
@@ -144,7 +167,7 @@ def step(model):
     name = next_name()
     row = {"version": name, "parent": best, "diagnosis": "", "train_median": None, "frozen_median": None, "accepted": False}
     try:
-        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract()), model))
+        row["diagnosis"], code = parse(ask(prompt, SYSTEM.format(contract=contract(), engines=ENGINE_NOTE if EXTRA else ""), model))
         (POLICIES / f"{name}.py").write_text(code)
         train = evaluate(name, "train")
         row |= {"train_median": train["median_s"], "train_slow_median": train["slow_median_s"], "train_all_diff": train["vs_baseline"]["everyone"]["median_diff_s"]}
@@ -186,7 +209,7 @@ def headline():
     keys = ("slow_median_s", "median_s", "mean_s", "p90_s", "actual_median_s", "n")
     out = {"version": best, "frozen": {k: s[k] for k in keys}, "baseline": {k: b[k] for k in keys}, "vs_baseline": s["vs_baseline"]}
     RUNS.mkdir(exist_ok=True)
-    (RUNS / "headline.json").write_text(json.dumps(out, indent=1))
+    HEADLINE.write_text(json.dumps(out, indent=1))
     print(json.dumps(out, indent=1))
 
 
@@ -196,7 +219,11 @@ def main():
     ap.add_argument("--model", default="sonnet")
     ap.add_argument("--headline", action="store_true")
     ap.add_argument("--rescore", action="store_true")
+    ap.add_argument("--engines", action="store_true")
     a = ap.parse_args()
+    if a.engines:
+        global VERSIONS, HEADLINE, PREFIX, EXTRA
+        VERSIONS, HEADLINE, PREFIX, EXTRA = RUNS / "engines.jsonl", RUNS / "engines_headline.json", "e", ["--engines"]
     if not history():
         seed()
     if a.rescore:
