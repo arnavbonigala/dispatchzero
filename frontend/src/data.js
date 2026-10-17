@@ -74,3 +74,9 @@ export async function loadLive() {
 export async function loadCameras() {
   return withImages(await api('/cameras'))
 }
+
+// One incident at a frozen-week moment, e.g. t = '2026-10-06T17:40:00'. See backend/dispatch.py.
+export async function dispatchIncident(lat, lon, t, priority = '3') {
+  const q = new URLSearchParams({ lat: lat.toFixed(5), lon: lon.toFixed(5), t, priority })
+  return api(`/dispatch?${q}`, 30000)
+}

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReplayMap from './ReplayMap'
+import DispatchLayer from './DispatchLayer'
+import DispatchPanel from './DispatchPanel'
 import VersionLog from './VersionLog.jsx'
-import { loadCameras, loadFixtures, loadLive } from './data'
+import { dispatchIncident, loadCameras, loadFixtures, loadLive } from './data'
 import { C, clock, mmss, secOfDay } from './format'
 import './App.css'
 
@@ -68,6 +70,56 @@ function usePlayback() {
     setPlaying(!playing)
   }
   return { now, setNow, playing, toggle, speed, setSpeed }
+}
+
+const DISPATCH_SPEED = 60 // simulated seconds per real second in the dispatch animation
+
+// Arm, click the map, fetch the decision, then run a clock for the animation
+function useDispatch(day, playback) {
+  const [state, setState] = useState({ armed: false, loading: false, error: null, result: null })
+  const [priority, setPriority] = useState('3')
+  const [elapsed, setElapsed] = useState(0)
+  const [runId, setRunId] = useState(0)
+
+  useEffect(() => {
+    if (!state.result) return
+    const r = state.result
+    const legs = [r.baseline, r.agent].filter((s) => s && !s.error)
+    const end = Math.max(...legs.flatMap((s) => [s.chosen.eta_s, s.engine?.eta_s ?? 0])) + (r.hospital?.drive_s ?? 0)
+    let raf
+    const t0 = performance.now()
+    const tick = (ts) => {
+      const e = ((ts - t0) / 1000) * DISPATCH_SPEED
+      setElapsed(Math.min(e, end))
+      if (e < end) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [state.result, runId])
+
+  const arm = () => {
+    if (playback.playing) playback.toggle()
+    setState({ armed: true, loading: false, error: null, result: null })
+  }
+  const close = () => setState({ armed: false, loading: false, error: null, result: null })
+  const pick = (lat, lon) => {
+    const s = Math.floor(playback.now)
+    const pad = (n) => String(n).padStart(2, '0')
+    const t = `${day}T${pad(Math.floor(s / 3600) % 24)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`
+    setState({ armed: false, loading: true, error: null, result: null })
+    dispatchIncident(lat, lon, t, priority)
+      .then((result) => {
+        setElapsed(0)
+        setState({ armed: false, loading: false, error: null, result })
+      })
+      .catch((e) => setState({ armed: false, loading: false, result: null,
+        error: `Live dispatch needs the API running (backend/api.py). ${e.message}` }))
+  }
+  const replay = () => {
+    setElapsed(0)
+    setRunId((n) => n + 1)
+  }
+  return { state, elapsed, arm, close, pick, replay, priority, setPriority }
 }
 
 const gain = (diff) => mmss(Math.abs(diff))
@@ -181,6 +233,9 @@ export default function App() {
   const { days, initial } = useMemo(() => daysOf(data.baseline.results), [data.baseline])
   const day = days.includes(pickedDay) ? pickedDay : initial
 
+  const dispatch = useDispatch(day, playback)
+  const dispatching = dispatch.state.result || dispatch.state.loading
+
   const calls = useMemo(
     () =>
       shown.results
@@ -202,11 +257,16 @@ export default function App() {
       <Hero headline={data.headline} />
       <main className="body">
         <div className="map-wrap">
-          <ReplayMap calls={calls} now={playback.now} cameras={data.cameras} posts={data.posts}
-            neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} />
+          <ReplayMap calls={dispatching ? [] : calls} now={playback.now} cameras={data.cameras} posts={data.posts}
+            neighborhoods={data.neighborhoods} slowNbhds={data.slowNbhds} armed={dispatch.state.armed}>
+            <DispatchLayer armed={dispatch.state.armed} onPick={dispatch.pick}
+              result={dispatch.state.result} elapsed={dispatch.elapsed} />
+          </ReplayMap>
           <Legend />
         </div>
         <aside className="side">
+          <DispatchPanel state={dispatch.state} onArm={dispatch.arm} onClose={dispatch.close} onReplay={dispatch.replay}
+            priority={dispatch.priority} setPriority={dispatch.setPriority} />
           <VersionLog />
           <Sources />
         </aside>

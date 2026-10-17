@@ -8,6 +8,7 @@ export const C = {
   slow: '#6d4fd8',
   unit: '#1f5fd1',
   engine: '#0e7490',
+  hospital: '#b4236b',
   post: '#55606e',
   line: '#9aa3ad',
   ink: '#1c2430',

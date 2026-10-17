@@ -6,7 +6,7 @@ import 'leaflet/dist/leaflet.css'
 
 const RECENT_S = 3600
 
-export default function ReplayMap({ calls, now, posts, neighborhoods, slowNbhds, cameras }) {
+export default function ReplayMap({ calls, now, posts, neighborhoods, slowNbhds, cameras, armed, children }) {
   const bounds = useMemo(() => L.geoJSON(neighborhoods).getBounds().pad(0.02), [neighborhoods])
   const postAt = (i) => posts[i] && [posts[i].lat, posts[i].lon]
 
@@ -16,7 +16,7 @@ export default function ReplayMap({ calls, now, posts, neighborhoods, slowNbhds,
       : { color: C.line, weight: 0.6, fillOpacity: 0 }
 
   return (
-    <MapContainer bounds={bounds} zoomSnap={0.25} className="map">
+    <MapContainer bounds={bounds} zoomSnap={0.25} className={`map ${armed ? 'armed' : ''}`}>
       <TileLayer
         url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
         attribution="Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors"
@@ -88,6 +88,7 @@ export default function ReplayMap({ calls, now, posts, neighborhoods, slowNbhds,
           </Popup>
         </CircleMarker>
       ))}
+      {children}
     </MapContainer>
   )
 }

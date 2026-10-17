@@ -170,7 +170,7 @@ Tick a box (`- [x]`) and push when a task is done. Each task links back to the t
 - [x] Camera markers (green/yellow/red, thumbnail on click)
 - [ ] Rush-hour jam clips recorded, plus replay mode
 - [x] UI wired to the real API
-- [ ] "Dispatch now" panel with reason text
+- [x] "Dispatch now" panel with reason text
 - [ ] Playwright screenshots at 390px and 1440px
 - [ ] Backup video
 

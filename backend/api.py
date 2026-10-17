@@ -97,3 +97,23 @@ def slow():
 @app.get("/speeds")
 def speeds():
     return load_json(DATA / "speeds.json")
+
+
+@app.get("/dispatch")
+def dispatch(lat: float, lon: float, t: str, policy: str | None = None, priority: str = "3"):
+    """One incident at a frozen-week moment: baseline vs agent pick, routes, and hospital. See dispatch.py."""
+    if not (37.70 <= lat <= 37.84 and -122.53 <= lon <= -122.35):
+        raise HTTPException(400, "location outside San Francisco")
+    if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?", t):
+        raise HTTPException(400, "t must look like 2026-10-06T17:40:00")
+    if policy and (not re.fullmatch(r"baseline|[ev]\d{3}", policy) or not (POLICIES / f"{policy}.py").exists()):
+        raise HTTPException(404, "unknown version")
+    if priority not in ("2", "3"):
+        raise HTTPException(400, "priority must be 2 or 3")
+    import dispatch as live  # loads the road graph on first use only
+
+    calls = live.frozen_calls()
+    t = t if len(t) == 19 else t + ":00"
+    if not calls["t"].min()[:10] <= t[:10] <= calls["t"].max()[:10]:
+        raise HTTPException(400, "t must fall in the frozen week")
+    return live.dispatch(lat, lon, t, policy, priority)
