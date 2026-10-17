@@ -12,7 +12,7 @@ CALTRANS = "https://cwwp2.dot.ca.gov/data/d4/cctv/cctvStatusD04.json"
 WEEKS = 5
 FIELDS = [
     "call_number", "unit_id", "received_dttm", "dispatch_dttm", "response_dttm",
-    "on_scene_dttm", "available_dttm", "case_location", "station_area",
+    "on_scene_dttm", "transport_dttm", "hospital_dttm", "available_dttm", "case_location", "station_area",
     "neighborhoods_analysis_boundaries", "priority", "call_type",
 ]
 
@@ -91,6 +91,7 @@ def build_calls(rows, start):
         "busy_s": secs("available_dttm", "dispatch_dttm"),
         "historical_s": secs("on_scene_dttm", "received_dttm"),
         "historical_unit": first["unit_id"],
+        "transported": first["hospital_dttm"].notna() if "hospital_dttm" in first else False,
     })
     calls["busy_s"] = calls["busy_s"].fillna(calls["busy_s"].median())
     ok = (
@@ -140,6 +141,18 @@ def fetch_cameras():
     return out
 
 
+def fetch_hospitals():
+    import osmnx as ox
+
+    g = ox.features_from_place("San Francisco, California, USA", tags={"amenity": "hospital"}).to_crs(4326)
+    out = []
+    for _, r in g.iterrows():
+        if r.get("emergency") == "yes":
+            c = r.geometry.centroid
+            out.append({"name": r.get("name"), "lat": round(c.y, 6), "lon": round(c.x, 6)})
+    return out
+
+
 def fetch_graph(path):
     import osmnx as ox
 
@@ -166,6 +179,10 @@ def main():
     print(f"calls: {len(calls)} ({calls.groupby('split').size().to_dict()}), posts: {len(posts)}, units: {len(units)}")
     print(f"unit dispatches: {len(dispatches)} ({int(dispatches['simulated'].sum())} simulated, {int((~dispatches['simulated']).sum())} background)")
     print(f"historical median response: {calls['historical_s'].median():.0f}s")
+
+    hospitals = fetch_hospitals()
+    (DATA / "hospitals.json").write_text(json.dumps(hospitals, indent=1))
+    print(f"hospitals with emergency departments: {len(hospitals)}, transported calls: {int(calls['transported'].sum())}")
 
     cams = fetch_cameras()
     (DATA / "cameras.json").write_text(json.dumps(cams, indent=1))
