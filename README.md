@@ -155,7 +155,7 @@ Limits to state honestly: SF publishes no unit locations, so the simulator assum
 
 ## Agent loop
 
-`agent.py --iters N` runs N rounds. Each round:
+`agent.py --iters N [--candidates K] [--engines]` runs N rounds. Each round writes K candidates in parallel (default 4), each prompted from a different angle (which engine to send, where ambulances wait using `FORECAST`, which ambulance to send, all three combined). Each candidate gets its own name and row. The best one that passes both gates is accepted (lowest training `weighted_mean_s` in engine mode, lowest slow-neighborhood median otherwise), and the other passers are rejected with "beaten by NAME this round". Each candidate:
 
 1. Takes the newest accepted version in `runs/versions.jsonl` as the current best (`baseline` on the first run).
 2. Asks Claude through the `claude` CLI (`--model`, default `sonnet`, no tools). The prompt includes the policy contract from this README, the current best's code, its training summary, the `--worst 50` context, the last 5 attempts, and the closest rejected candidate's code. Holdout numbers never go into the prompt; a holdout failure shows up only as "failed the holdout gate".
@@ -164,6 +164,14 @@ Limits to state honestly: SF publishes no unit locations, so the simulator assum
 5. Appends `{version, parent, diagnosis, train_median, frozen_median, accepted, reason, ...}` to `runs/versions.jsonl`. `frozen_median` is filled only for accepted versions and is never shown to the agent.
 
 `agent.py --headline` scores the newest accepted version once on the frozen week against baseline and writes `runs/headline.json`.
+
+In engine mode the objective is `weighted_mean_s` (life-threatening calls count double): a candidate must beat the current best's on training and baseline's on holdout. The prompt shows `lt_mean_s` and `stats.fire_delay_s`, and rows record `train_weighted_mean`, `train_fire_delay_s` and `holdout_lt_mean_diff`.
+
+## Demand forecast
+
+`forecast.py` fits a Poisson regression of hourly calls per neighborhood on the training weeks only: a neighborhood effect, hour of day, weekend, heat (degrees above 25 C) and rain (more than 0.1 mm), from `data/weather.json`. It writes `data/forecast.json` with `"<nbhd>|<YYYY-MM-DDTHH>": expected calls` for every neighborhood and hour, plus `_report`: holdout deviance and MAE against a train average per neighborhood and hour of day, and the fitted effects. The 65+ effect comes from regressing the neighborhood effects on log population and `pct_65_plus` (`data/neighborhoods.json`). `--self-check` recovers known effects from synthetic data.
+
+Current result: holdout deviance 4,135 vs 5,504 for the naive average (better), MAE 0.304 vs 0.301 (tied). Rain ×1.24 rests on only 5 rainy training hours. Heat ×1.03 per degree above 25 C. Weekend ×1.01. Share 65+ ×0.77 per 10 points after controlling for population, from 41 neighborhoods, so treat it as noise.
 
 ## API
 
