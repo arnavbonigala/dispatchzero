@@ -277,25 +277,31 @@ function Timeline({ now, setNow, playing, toggle, day }) {
   )
 }
 
+const KEY = [
+  [{ background: C.good }, '≤ 8 min'], [{ background: C.warn }, '8–12 min'], [{ background: C.bad }, '> 12 min'],
+  [{ background: C.unit }, 'ambulance'], [{ background: C.engine }, 'fire engine'],
+  [{ borderColor: C.slow, background: `${C.slow}33` }, 'slowest 10 areas', 'sq'],
+  [{ borderColor: C.ink, background: C.good }, 'freeway camera', 'ring'], [null, 'column height = response time', 'bar'],
+]
+
 function Legend({ show, setShow }) {
+  const [open, setOpen] = useState(false)
   return (
-    <ul className="legend glass">
-      <li className="legend-toggles" role="group" aria-label="Incident layers">
+    <div className="legend glass">
+      <div className="legend-toggles" role="group" aria-label="Incident layers">
         {LAYERS.map(([k, label, color]) => (
           <button key={k} aria-pressed={show[k]} onClick={() => setShow((s) => ({ ...s, [k]: !s[k] }))}>
             {color.startsWith('heat') ? <i className={color} /> : <i style={{ background: color }} />} {label}
           </button>
         ))}
-      </li>
-      <li><i style={{ background: C.good }} /> ≤ 8 min</li>
-      <li><i style={{ background: C.warn }} /> 8–12 min</li>
-      <li><i style={{ background: C.bad }} /> &gt; 12 min</li>
-      <li><i style={{ background: C.unit }} /> ambulance</li>
-      <li><i style={{ background: C.engine }} /> fire engine</li>
-      <li><i className="sq" style={{ borderColor: C.slow, background: `${C.slow}33` }} /> slowest 10 areas</li>
-      <li><i className="ring" style={{ borderColor: C.ink, background: C.good }} /> freeway camera</li>
-      <li><i className="bar" /> column height = response time</li>
-    </ul>
+        <button className="key-btn" aria-expanded={open} aria-controls="map-key" onClick={() => setOpen(!open)}>Map key</button>
+      </div>
+      {open && (
+        <ul id="map-key" className="map-key glass">
+          {KEY.map(([style, label, cls]) => <li key={label}><i className={cls} style={style ?? undefined} /> {label}</li>)}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -369,8 +375,8 @@ export default function App() {
         </header>
         <Hero headline={data.headline} />
         <SystemBar day={day} now={playback.now} version={view === 'agent' ? 'best' : 'baseline'} dispatchMs={dispatch.ms} />
+        <Legend show={show} setShow={setShow} />
       </div>
-      <Legend show={show} setShow={setShow} />
       <aside className="side glass">
         {trained && !learning.calls && (
           <>
