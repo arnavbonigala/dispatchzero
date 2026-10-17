@@ -7,35 +7,50 @@
   --vl-rej: #7d8896;
   --vl-card: #1d2127;
   color: var(--vl-fg);
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 16px;
   text-align: left;
 }
 
-.vl h2 { font-size: 1.5rem; margin: 0 0 4px; }
-.vl h3 { font-size: 1.1rem; margin: 24px 0 8px; }
-.vl-sub, .vl-empty { color: var(--vl-muted); margin: 0 0 12px; font-size: 0.9rem; }
+.vl-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vl h2 { margin: 0; }
+.vl-sub { color: var(--vl-muted); margin: 4px 0 6px; font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+.vl-sub b { color: var(--vl-best); font-weight: 600; }
+
+.vl-play, .vl-nav button {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--vl-fg);
+  background: var(--vl-card);
+  border: 1px solid var(--vl-line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vl-play[aria-pressed='true'] { border-color: var(--vl-best); color: var(--vl-best); }
+.vl-play:focus-visible, .vl-nav button:focus-visible, .vl-dot:focus-visible { outline: 2px solid var(--vl-best); outline-offset: 2px; }
 
 .vl-chart { width: 100%; height: auto; display: block; }
 .vl-grid { stroke: var(--vl-line); stroke-width: 1; }
-.vl-axis { fill: var(--vl-muted); font-size: 12px; }
-.vl-best { fill: none; stroke: var(--vl-best); stroke-width: 2.5; }
-.vl-dot { stroke: #16191e; stroke-width: 2; }
+.vl-axis { fill: var(--vl-muted); font-size: 11px; }
+.vl-best { fill: none; stroke: var(--vl-best); stroke-width: 2.5; stroke-linejoin: round; }
+.vl-dot { stroke: #16191e; stroke-width: 1.5; cursor: pointer; transition: r 150ms ease, opacity 150ms ease; }
 .vl-accepted { fill: var(--vl-ok); }
 .vl-rejected { fill: var(--vl-rej); }
+.vl-sel { stroke: var(--vl-best); stroke-width: 2.5; }
+.vl-future { opacity: 0.3; }
 
-.vl-feed { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
-.vl-item { background: var(--vl-card); border-left: 4px solid var(--vl-ok); border-radius: 10px; padding: 8px 10px; }
-.vl-item-rejected { border-left-color: var(--vl-rej); }
-.vl-item p { margin: 4px 0 0; font-size: 0.85rem; line-height: 1.4; overflow-wrap: anywhere; }
-.vl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.85rem; }
-.vl-badge { font-size: 0.72rem; padding: 0 7px; border-radius: 999px; border: 1px solid var(--vl-rej); color: var(--vl-muted); }
+.vl-nav { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 6px; margin-top: 6px; }
+.vl-nav button { padding: 3px 8px; }
+.vl-nav button:disabled { opacity: 0.35; cursor: default; }
+.vl-detail { min-height: 4.6em; font-size: 0.82rem; line-height: 1.35; margin: 0; }
+.vl-detail p { margin: 3px 0 0; overflow-wrap: anywhere; }
+.vl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vl-badge { font-size: 0.7rem; padding: 0 7px; border-radius: 999px; border: 1px solid var(--vl-rej); color: var(--vl-muted); }
 .vl-badge-ok { border-color: var(--vl-ok); color: var(--vl-ok); }
-.vl-meta { font-weight: 600; color: var(--vl-ok); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
-.vl-reason { color: var(--vl-muted); font-size: 0.8rem !important; }
-.vl-more { margin-top: 8px; font: inherit; font-size: 0.85rem; padding: 5px 12px; color: var(--vl-fg); background: var(--vl-card); border: 1px solid var(--vl-line); border-radius: 6px; cursor: pointer; }
-.vl-more:focus-visible { outline: 2px solid var(--vl-best); outline-offset: 2px; }
-.vl-lessons { margin-top: 12px; }
-.vl-lessons h3 { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--vl-muted); margin: 0 0 6px; }
-.vl-lessons ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 0.85rem; line-height: 1.4; }
+.vl-meta { font-weight: 600; color: var(--vl-ok); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.vl-reason { color: var(--vl-muted); font-size: 0.78rem; }
+
+.vl-lesson { margin: 8px 0 0; font-size: 0.78rem; line-height: 1.35; color: var(--vl-muted); }
+.vl-lesson span { color: var(--vl-best); font-weight: 600; margin-right: 4px; }
+
+@media (prefers-reduced-motion: reduce) { .vl-dot { transition: none; } }
