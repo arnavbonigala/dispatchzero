@@ -1,0 +1,10 @@
+pandas
+requests
+pyarrow
+osmnx
+networkx
+fastapi
+uvicorn
+anthropic
+ultralytics
+opencv-python
