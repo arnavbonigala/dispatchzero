@@ -179,6 +179,7 @@ def load_policy(policy, world):
     mod.POST_DRIVE = [[round(float(world.travel[a, n]), 1) for n in world.post_nodes] for a in range(len(world.post_nodes))]
     mod.BUCKET_OF = dict(BUCKET_OF)
     mod.ENGINES = dict(world.engines)
+    mod.ENGINE_LOAD = dict(world.engine_load)
     spec.loader.exec_module(mod)
     return mod
 
@@ -201,6 +202,7 @@ class World:
         self.engine_background = []
         self.engine_offsets = {b: 0.0 for b in BUCKETS}
         self.engine_on_scene = 0.0
+        self.engine_load = {}
 
     @classmethod
     def load(cls, roads=None, slowdowns=None, offsets=None):
@@ -234,6 +236,11 @@ class World:
             ed = ed[~ed["simulated"]]
             world.engine_background = sorted(zip(epoch(ed["start"]), epoch(ed["end"]), ed["unit_id"]))
             world.engine_offsets = fit_engine_offsets(world)
+            frozen = epoch([calls.loc[calls["split"] == "frozen", "t"].min()])[0]
+            fit = ed[epoch(ed["start"]) < frozen]
+            days = (frozen - epoch([calls["t"].min()])[0]) / 86400
+            hours = pd.to_datetime(fit["start"]).dt.hour
+            world.engine_load = {f"{u}|{h}": round(n / days, 3) for (u, h), n in fit.groupby([fit["unit_id"], hours]).size().items()}
         return world
 
     def demand(self):
