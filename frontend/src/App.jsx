@@ -237,7 +237,7 @@ function Hero({ headline }) {
       <div className="hero-compare">
         <div><span>Baseline</span><strong>{mmss(b.mean_s)}</strong></div>
         <i aria-hidden="true">→</i>
-        <div className="gm"><span>Golden Minute</span><strong>{mmss(f.mean_s)}</strong></div>
+        <div className="gm"><span>DispatchZero</span><strong>{mmss(f.mean_s)}</strong></div>
       </div>
       <ul className="hero-sub">
         {stats.map(([d, label]) => <li key={label}><b>{gain(d)}</b> {label}</li>)}
@@ -299,7 +299,7 @@ function ViewToggle({ view, setView, agent }) {
     <div className="toggle" role="group" aria-label="Dispatcher shown on the map">
       {['baseline', 'agent'].map((v) => (
         <button key={v} aria-pressed={view === v} disabled={v === 'agent' && !agent} onClick={() => setView(v)}>
-          {v === 'baseline' ? 'Baseline' : 'Golden Minute'}
+          {v === 'baseline' ? 'Baseline' : 'DispatchZero'}
         </button>
       ))}
     </div>
@@ -352,9 +352,9 @@ export default function App() {
       <div className="left">
         <header className="top glass">
           <div className="brand">
-            <span className="logo" aria-hidden="true" />
+            <img className="logo" src="/mark.png" alt="" width="34" height="34" />
             <div>
-              <h1>Golden Minute</h1>
+              <h1>Dispatch<span className="zero">Zero</span></h1>
               <p>
                 Real SF 911 calls from a week the AI never saw
                 {learned && <> · last learned {dayLabel(learned.last_learned)}</>}

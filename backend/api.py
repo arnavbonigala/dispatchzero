@@ -14,7 +14,7 @@ FIXTURES = ROOT / "fixtures"
 POLICIES = Path(__file__).parent / "policies"
 SPLITS = {"train", "holdout", "frozen"}
 
-app = FastAPI(title="Golden Minute")
+app = FastAPI(title="DispatchZero")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 

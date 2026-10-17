@@ -1,19 +1,30 @@
 import { clock, mmss } from './format'
 
-function Side({ title, side, gm }) {
+function Unit({ kind, unit, first }) {
+  const label = kind === 'engine' ? 'Engine' : 'Ambulance'
+  return (
+    <li className={first ? 'first' : ''}>
+      <i className={`dot ${kind === 'engine' ? 'eng' : 'amb'}`} /> <b>{label}</b> <span>{mmss(unit.eta_s)}</span>
+    </li>
+  )
+}
+
+function Side({ title, side, gm, vs }) {
   if (!side) return null
   if (side.error) return <div className="dp-side"><h3>{title}</h3><p className="pending">{side.error}</p></div>
   const f = side.first
+  const saved = gm && vs && !vs.error ? vs.first.eta_s - f.eta_s : null
   return (
     <div className={`dp-side ${gm ? 'gm' : ''}`}>
       <h3>{title}</h3>
       <strong className="dp-first">{mmss(f.eta_s)}</strong>
-      <span className="dp-sub">first paramedic · {f.kind} {f.unit_id}</span>
+      <span className="dp-sub">until a paramedic arrives</span>
+      {saved != null && <span className={saved >= 1 ? 'dp-gain' : 'dp-gain flat'}>{saved >= 1 ? `${mmss(saved)} sooner` : 'same as baseline'}</span>}
       <ul>
-        <li><i className="dot amb" /> {side.chosen.unit_id} from post {side.chosen.post} · {mmss(side.chosen.eta_s)}</li>
+        <Unit kind="ambulance" unit={side.chosen} first={f.kind !== 'engine'} />
         {side.engine
-          ? <li><i className="dot eng" /> {side.engine.unit_id} from post {side.engine.post} · {mmss(side.engine.eta_s)}</li>
-          : <li><i className="dot eng off" /> no engine sent</li>}
+          ? <Unit kind="engine" unit={side.engine} first={f.kind === 'engine'} />
+          : <li className="none"><i className="dot eng off" /> No fire engine sent</li>}
       </ul>
     </div>
   )
@@ -81,7 +92,7 @@ export default function DispatchPanel({ state, onArm, onClose, onReplay, onWatch
           {children}
           <div className="dp-compare">
             <Side title="Baseline" side={result.baseline} />
-            <Side title="Golden Minute" side={result.agent} gm />
+            <Side title="DispatchZero" side={result.agent} gm vs={result.baseline} />
           </div>
           {result.reason && <p className="dp-reason">{result.reason}</p>}
           {result.traffic_reason && (

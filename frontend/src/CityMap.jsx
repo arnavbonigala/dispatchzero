@@ -85,7 +85,7 @@ function dispatchLegs(result, elapsed) {
       if (!u?.route?.length) continue
       const engine = color === C.engine
       legs.push({ id: `${key}-${u.unit_id}`, gm, color, offset: [0, (gm ? -18 : 18) * (engine ? 2.2 : 1)], path: u.route.map(ll), at: ll(along(u.route, elapsed / u.eta_s)),
-        done: elapsed >= u.eta_s, label: `${gm ? 'Golden Minute' : 'Baseline'} · ${u.unit_id}` })
+        done: elapsed >= u.eta_s, label: `${gm ? 'DispatchZero' : 'Baseline'} · ${u.unit_id}` })
     }
   }
   return legs
