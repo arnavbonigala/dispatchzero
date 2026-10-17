@@ -1,8 +1,8 @@
 {
  "version": "baseline",
  "split": "frozen",
- "median_s": 655.0,
- "p90_s": 1291.0,
- "pct_under_8min": 0.2703862660944206,
+ "median_s": 623.4,
+ "p90_s": 1413.4,
+ "pct_under_8min": 0.33476394849785407,
  "n": 233
 }
